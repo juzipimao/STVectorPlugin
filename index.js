@@ -575,15 +575,17 @@
                                 <label class="vector-form-label">
                                     <input type="checkbox" id="query-enabled"> 启用向量查询
                                 </label>
+                                <small>开启后将使用外部API进行向量查询</small>
                             </div>
 
                             <div class="vector-form-group">
                                 <label class="vector-form-label" for="query-api-endpoint">API 端点:</label>
                                 <select id="query-api-endpoint" class="vector-form-select">
-                                    <option value="openai">OpenAI</option>
+                                    <option value="openai">OpenAI (推荐)</option>
                                     <option value="azure">Azure OpenAI</option>
                                     <option value="custom">自定义端点</option>
                                 </select>
+                                <small>选择向量化服务提供商</small>
                             </div>
 
                             <div class="vector-form-group" id="custom-endpoint-group" style="display: none;">
@@ -594,17 +596,20 @@
                             <div class="vector-form-group">
                                 <label class="vector-form-label" for="query-api-key">API Key:</label>
                                 <input type="password" id="query-api-key" class="vector-form-input" placeholder="输入向量化API密钥">
+                                <small>请确保API Key有足够的配额</small>
                             </div>
 
                             <div class="vector-form-group">
                                 <label class="vector-form-label" for="query-model">模型:</label>
                                 <input type="text" id="query-model" class="vector-form-input" placeholder="text-embedding-ada-002">
+                                <small>推荐使用 text-embedding-3-small 或 text-embedding-ada-002</small>
                             </div>
 
                             <div class="vector-form-group">
                                 <label class="vector-form-label">
                                     <input type="checkbox" id="query-notify"> 查询成功通知
                                 </label>
+                                <small>显示向量查询结果的通知消息</small>
                             </div>
 
                             <div class="vector-form-group">
@@ -639,9 +644,19 @@
                             </div>
 
                             <div class="vector-form-group">
-                                <button class="vector-btn" onclick="testVectorAPI()">测试API连接</button>
-                                <button class="vector-btn" onclick="showVectorStats()">查看向量统计</button>
-                                <button class="vector-btn" onclick="clearVectorStorage()" style="background-color: #dc3545; color: white;">清空向量存储</button>
+                                <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                                    <button class="vector-btn" onclick="testVectorAPI()">
+                                        🔗 测试API连接
+                                    </button>
+                                    <button class="vector-btn" onclick="showVectorStats()">
+                                        📊 查看向量统计
+                                    </button>
+                                    <button class="vector-btn" onclick="clearVectorStorage()"
+                                            style="background-color: #dc3545; color: white; border-color: #dc3545;">
+                                        🗑️ 清空存储
+                                    </button>
+                                </div>
+                                <small>建议先测试API连接确保配置正确</small>
                             </div>
                         </div>
 
@@ -683,22 +698,25 @@
                         <!-- 注入设置标签页 -->
                         <div id="injection-tab" class="vector-tab-content">
                             <div class="vector-form-group">
-                                <label class="vector-form-label" for="injection-template">注入提示词:</label>
+                                <label class="vector-form-label" for="injection-template">注入提示词模板:</label>
                                 <textarea id="injection-template" class="vector-form-textarea" placeholder="相关内容：\n{{text}}"></textarea>
+                                <small>使用 {{text}} 作为内容占位符</small>
                             </div>
 
                             <div class="vector-form-group">
-                                <label class="vector-form-label" for="injection-depth">聊天内@深度:</label>
+                                <label class="vector-form-label" for="injection-depth">注入深度:</label>
                                 <input type="number" id="injection-depth" class="vector-form-input" min="1" max="20" value="1">
+                                <small>在聊天历史中的注入位置，1表示最新消息前</small>
                             </div>
 
                             <div class="vector-form-group">
-                                <label class="vector-form-label" for="role-type">作为:</label>
+                                <label class="vector-form-label" for="role-type">注入角色类型:</label>
                                 <select id="role-type" class="vector-form-select">
-                                    <option value="system">系统</option>
-                                    <option value="character">角色</option>
-                                    <option value="model">模型</option>
+                                    <option value="system">系统消息</option>
+                                    <option value="character">角色消息</option>
+                                    <option value="model">模型消息</option>
                                 </select>
+                                <small>选择注入内容的消息类型</small>
                             </div>
                         </div>
 
@@ -706,27 +724,36 @@
                         <div id="vectorization-tab" class="vector-tab-content">
                             <div class="vector-form-group">
                                 <label class="vector-form-label">
-                                    <input type="checkbox" id="include-chat-messages"> 勾选聊天消息
+                                    <input type="checkbox" id="include-chat-messages"> 包含聊天消息
                                 </label>
+                                <small>启用后将处理聊天记录中的消息</small>
                             </div>
 
                             <div class="vector-form-group">
-                                <label class="vector-form-label" for="layer-range">聊天层数:</label>
+                                <label class="vector-form-label" for="layer-range">聊天层数范围:</label>
                                 <input type="text" id="layer-range" class="vector-form-input" placeholder="1-10" value="1-10">
+                                <small>格式: 开始-结束，如 "1-10" 表示最近10条消息</small>
                             </div>
 
                             <div class="vector-form-group">
                                 <label class="vector-form-label">消息类型:</label>
-                                <div>
-                                    <label><input type="checkbox" id="include-user"> 用户消息</label>
-                                    <label><input type="checkbox" id="include-ai"> AI消息</label>
-                                    <label><input type="checkbox" id="include-hidden"> 隐藏消息</label>
+                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                    <label class="vector-form-label"><input type="checkbox" id="include-user"> 用户消息</label>
+                                    <label class="vector-form-label"><input type="checkbox" id="include-ai"> AI消息</label>
+                                    <label class="vector-form-label"><input type="checkbox" id="include-hidden"> 隐藏消息</label>
                                 </div>
                             </div>
 
                             <div class="vector-form-group">
-                                <button class="vector-btn vector-btn-success" onclick="startVectorization()">开始向量化</button>
-                                <button class="vector-btn" onclick="showPreview()">预览</button>
+                                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                    <button class="vector-btn vector-btn-success" onclick="startVectorization()">
+                                        🚀 开始向量化
+                                    </button>
+                                    <button class="vector-btn" onclick="showPreview()">
+                                        👁️ 预览内容
+                                    </button>
+                                </div>
+                                <small>预览可以查看将要向量化的内容</small>
                             </div>
 
                             <div class="vector-form-group">
