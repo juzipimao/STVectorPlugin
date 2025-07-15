@@ -1,0 +1,14 @@
+{
+    "display_name": "向量管理插件",
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "dependencies": ["vectors"],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "梅川晓钡锌",
+    "version": "1.0.0",
+    "homePage": "https://github.com/your-username/vector-manager-plugin",
+    "auto_update": true,
+    "description": "为 SillyTavern 提供强大的向量查询、Rerank 和内容管理功能"
+}

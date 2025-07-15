@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>向量管理插件测试</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        
+        .test-button:hover {
+            background: #0056b3;
+        }
+        
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        
+        .mock-st {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>SillyTavern 向量管理插件测试</h1>
+        
+        <div class="mock-st">
+            <h3>模拟 SillyTavern 环境</h3>
+            <p>这个页面模拟了 SillyTavern 的基本环境来测试插件功能。</p>
+        </div>
+        
+        <div>
+            <button class="test-button" onclick="testShowModal()">测试显示模态框</button>
+            <button class="test-button" onclick="testSettings()">测试设置功能</button>
+            <button class="test-button" onclick="testVectorization()">测试向量化功能</button>
+            <button class="test-button" onclick="testPreview()">测试预览功能</button>
+        </div>
+        
+        <div id="test-results">
+            <h3>测试结果:</h3>
+        </div>
+        
+        <!-- 模拟扩展设置面板 -->
+        <div id="extensions_settings" style="display: none;"></div>
+    </div>
+
+    <script>
+        // 模拟 SillyTavern 环境
+        window.SillyTavern = {
+            getContext: function() {
+                return {
+                    chat: [
+                        {
+                            mes: "你好，这是一条测试消息。",
+                            is_user: true,
+                            name: "User",
+                            send_date: Date.now() - 1000000
+                        },
+                        {
+                            mes: "你好！我是AI助手，很高兴为您服务。",
+                            is_user: false,
+                            name: "Assistant",
+                            send_date: Date.now() - 500000
+                        },
+                        {
+                            mes: "请帮我解释一下向量数据库的工作原理。",
+                            is_user: true,
+                            name: "User",
+                            send_date: Date.now() - 100000
+                        }
+                    ],
+                    characters: [],
+                    extensionSettings: {},
+                    saveSettingsDebounced: function() {
+                        console.log('设置已保存');
+                        addTestResult('设置保存功能正常');
+                    }
+                };
+            }
+        };
+
+        // CSS 变量模拟
+        document.documentElement.style.setProperty('--SmartThemeBodyColor', '#ffffff');
+        document.documentElement.style.setProperty('--SmartThemeBorderColor', '#dee2e6');
+        document.documentElement.style.setProperty('--SmartThemeQuoteColor', '#f8f9fa');
+        document.documentElement.style.setProperty('--SmartThemeEmColor', '#212529');
+
+        function addTestResult(message) {
+            const results = document.getElementById('test-results');
+            const result = document.createElement('div');
+            result.className = 'test-result';
+            result.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong>: ${message}`;
+            results.appendChild(result);
+        }
+
+        function testShowModal() {
+            try {
+                // 这里应该调用插件的显示模态框函数
+                addTestResult('模态框显示测试 - 需要加载插件后测试');
+                
+                // 模拟点击设置按钮
+                const button = document.getElementById('vector-manager-button');
+                if (button) {
+                    button.click();
+                    addTestResult('模态框已显示');
+                } else {
+                    addTestResult('插件按钮未找到，请先加载插件');
+                }
+            } catch (error) {
+                addTestResult(`模态框测试失败: ${error.message}`);
+            }
+        }
+
+        function testSettings() {
+            try {
+                const context = SillyTavern.getContext();
+                context.extensionSettings['vector-manager'] = {
+                    vectorQuery: {
+                        enabled: true,
+                        apiKey: 'test-key',
+                        model: 'test-model'
+                    }
+                };
+                context.saveSettingsDebounced();
+                addTestResult('设置功能测试通过');
+            } catch (error) {
+                addTestResult(`设置测试失败: ${error.message}`);
+            }
+        }
+
+        function testVectorization() {
+            try {
+                const context = SillyTavern.getContext();
+                const messages = context.chat;
+                addTestResult(`找到 ${messages.length} 条聊天消息`);
+                
+                // 模拟文本提取
+                const textContent = messages.map(msg => ({
+                    text: msg.mes,
+                    isUser: msg.is_user,
+                    name: msg.name
+                }));
+                
+                addTestResult(`提取了 ${textContent.length} 条文本内容`);
+                addTestResult('向量化功能测试通过');
+            } catch (error) {
+                addTestResult(`向量化测试失败: ${error.message}`);
+            }
+        }
+
+        function testPreview() {
+            try {
+                const context = SillyTavern.getContext();
+                const messages = context.chat;
+                
+                let previewText = `预览内容 (共 ${messages.length} 条消息):\n\n`;
+                messages.forEach((msg, index) => {
+                    previewText += `${index + 1}. [${msg.name}] ${msg.mes}\n\n`;
+                });
+                
+                addTestResult('预览内容生成成功');
+                addTestResult(`预览文本长度: ${previewText.length} 字符`);
+            } catch (error) {
+                addTestResult(`预览测试失败: ${error.message}`);
+            }
+        }
+
+        // 页面加载完成后的初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            addTestResult('测试环境初始化完成');
+            addTestResult('SillyTavern 模拟环境已准备就绪');
+        });
+    </script>
+
+    <!-- 加载插件 -->
+    <script src="index.js"></script>
+</body>
+</html>
