@@ -15,7 +15,7 @@
 
     // 模块名称
     const MODULE_NAME = 'vector-manager';
-    
+
     // 默认设置
     const defaultSettings = {
         // 向量查询设置
@@ -33,7 +33,7 @@
             batchSize: 5,
             notifySuccess: true
         },
-        
+
         // Rerank 设置
         rerank: {
             enabled: false,
@@ -43,14 +43,14 @@
             topN: 5,
             hybridWeight: 0.5
         },
-        
+
         // 注入设置
         injection: {
             template: '相关内容：\n{{text}}',
             depth: 1,
             roleType: 'system' // system, character, model
         },
-        
+
         // 向量化设置
         vectorization: {
             includeChatMessages: true,
@@ -107,12 +107,12 @@
         const notification = document.createElement('div');
         notification.className = `vector-notification ${type}`;
         notification.textContent = message;
-        
+
         document.body.appendChild(notification);
-        
+
         // 显示动画
         setTimeout(() => notification.classList.add('show'), 100);
-        
+
         // 自动隐藏
         setTimeout(() => {
             notification.classList.remove('show');
@@ -127,7 +127,7 @@
         if (!context.chat || context.chat.length === 0) {
             return [];
         }
-        
+
         const messages = context.chat.slice(-count);
         return messages;
     }
@@ -165,13 +165,39 @@
      * 文本分块
      */
     function splitIntoChunks(text, chunkSize, overlap) {
+        // 参数验证
+        if (!text || typeof text !== 'string') {
+            console.warn('splitIntoChunks: 无效的文本输入');
+            return [];
+        }
+
+        if (chunkSize <= 0) {
+            console.warn('splitIntoChunks: chunkSize 必须大于 0');
+            return [{ text: text.trim(), start: 0, end: text.length }];
+        }
+
+        if (overlap < 0) {
+            console.warn('splitIntoChunks: overlap 不能为负数，设置为 0');
+            overlap = 0;
+        }
+
+        // 确保 overlap 小于 chunkSize，防止无限循环
+        if (overlap >= chunkSize) {
+            console.warn(`splitIntoChunks: overlap (${overlap}) 必须小于 chunkSize (${chunkSize})，自动调整为 ${Math.floor(chunkSize * 0.5)}`);
+            overlap = Math.floor(chunkSize * 0.5);
+        }
+
         const chunks = [];
         let start = 0;
-        
-        while (start < text.length) {
+        let iterationCount = 0;
+        const maxIterations = Math.ceil(text.length / (chunkSize - overlap)) + 10; // 安全上限
+
+        while (start < text.length && iterationCount < maxIterations) {
+            iterationCount++;
+
             const end = Math.min(start + chunkSize, text.length);
             const chunk = text.substring(start, end);
-            
+
             if (chunk.trim().length > 0) {
                 chunks.push({
                     text: chunk.trim(),
@@ -179,11 +205,29 @@
                     end: end
                 });
             }
-            
-            start = end - overlap;
-            if (start >= text.length) break;
+
+            // 计算下一个起始位置
+            const nextStart = start + chunkSize - overlap;
+
+            // 确保进度，防止无限循环
+            if (nextStart <= start) {
+                console.warn('splitIntoChunks: 检测到潜在的无限循环，强制步进');
+                start = start + Math.max(1, Math.floor(chunkSize / 2));
+            } else {
+                start = nextStart;
+            }
+
+            // 如果剩余文本太短，直接处理完毕
+            if (text.length - start < overlap) {
+                break;
+            }
         }
-        
+
+        // 检查是否因为迭代次数限制而退出
+        if (iterationCount >= maxIterations) {
+            console.error('splitIntoChunks: 达到最大迭代次数限制，可能存在无限循环');
+        }
+
         return chunks;
     }
 
@@ -507,7 +551,7 @@
         if (!settings.rerank.enabled || !apiKey) {
             return documents;
         }
-        
+
         try {
             const response = await fetch('https://api.cohere.ai/v1/rerank', {
                 method: 'POST',
@@ -522,23 +566,23 @@
                     top_n: settings.rerank.topN
                 })
             });
-            
+
             if (!response.ok) {
                 throw new Error(`Rerank API 错误: ${response.status}`);
             }
-            
+
             const result = await response.json();
-            
+
             // 重新排序文档
             const rerankedDocs = result.results.map(item => ({
                 ...documents[item.index],
                 rerankScore: item.relevance_score
             }));
-            
+
             if (settings.rerank.notify) {
                 showNotification(`Rerank 完成，处理了 ${rerankedDocs.length} 个结果`, 'success');
             }
-            
+
             return rerankedDocs;
         } catch (error) {
             console.error('Rerank 失败:', error);
@@ -918,42 +962,136 @@
      * 从表单保存设置
      */
     function saveSettingsFromForm() {
-        // 向量查询设置
-        settings.vectorQuery.enabled = document.getElementById('query-enabled').checked;
-        settings.vectorQuery.apiEndpoint = document.getElementById('query-api-endpoint').value;
-        settings.vectorQuery.customApiUrl = document.getElementById('custom-api-url').value;
-        settings.vectorQuery.apiKey = document.getElementById('query-api-key').value;
-        settings.vectorQuery.model = document.getElementById('query-model').value;
-        settings.vectorQuery.notifySuccess = document.getElementById('query-notify').checked;
-        settings.vectorQuery.chunkSize = parseInt(document.getElementById('chunk-size').value);
-        settings.vectorQuery.overlap = parseInt(document.getElementById('overlap-size').value);
-        settings.vectorQuery.scoreThreshold = parseFloat(document.getElementById('score-threshold').value);
-        settings.vectorQuery.queryMessageCount = parseInt(document.getElementById('query-message-count').value);
-        settings.vectorQuery.maxResults = parseInt(document.getElementById('max-results').value);
-        settings.vectorQuery.batchSize = parseInt(document.getElementById('batch-size').value);
+        try {
+            // 向量查询设置
+            settings.vectorQuery.enabled = document.getElementById('query-enabled').checked;
+            settings.vectorQuery.apiEndpoint = document.getElementById('query-api-endpoint').value;
+            settings.vectorQuery.customApiUrl = document.getElementById('custom-api-url').value;
+            settings.vectorQuery.apiKey = document.getElementById('query-api-key').value;
+            settings.vectorQuery.model = document.getElementById('query-model').value;
+            settings.vectorQuery.notifySuccess = document.getElementById('query-notify').checked;
 
-        // Rerank设置
-        settings.rerank.enabled = document.getElementById('rerank-enabled').checked;
-        settings.rerank.notify = document.getElementById('rerank-notify').checked;
-        settings.rerank.apiKey = document.getElementById('rerank-api-key').value;
-        settings.rerank.model = document.getElementById('rerank-model').value;
-        settings.rerank.topN = parseInt(document.getElementById('rerank-top-n').value);
-        settings.rerank.hybridWeight = parseFloat(document.getElementById('hybrid-weight').value);
+            // 数值参数验证和修正
+            let chunkSize = parseInt(document.getElementById('chunk-size').value);
+            let overlap = parseInt(document.getElementById('overlap-size').value);
 
-        // 注入设置
-        settings.injection.template = document.getElementById('injection-template').value;
-        settings.injection.depth = parseInt(document.getElementById('injection-depth').value);
-        settings.injection.roleType = document.getElementById('role-type').value;
+            // 验证 chunkSize
+            if (isNaN(chunkSize) || chunkSize <= 0) {
+                chunkSize = 512;
+                document.getElementById('chunk-size').value = chunkSize;
+                showNotification('块大小无效，已重置为 512', 'warning');
+            } else if (chunkSize > 8192) {
+                chunkSize = 8192;
+                document.getElementById('chunk-size').value = chunkSize;
+                showNotification('块大小过大，已限制为 8192', 'warning');
+            }
 
-        // 向量化设置
-        settings.vectorization.includeChatMessages = document.getElementById('include-chat-messages').checked;
-        settings.vectorization.layerRange = document.getElementById('layer-range').value;
-        settings.vectorization.messageTypes.user = document.getElementById('include-user').checked;
-        settings.vectorization.messageTypes.ai = document.getElementById('include-ai').checked;
-        settings.vectorization.messageTypes.hidden = document.getElementById('include-hidden').checked;
+            // 验证 overlap
+            if (isNaN(overlap) || overlap < 0) {
+                overlap = 0;
+                document.getElementById('overlap-size').value = overlap;
+                showNotification('重叠大小无效，已重置为 0', 'warning');
+            } else if (overlap >= chunkSize) {
+                overlap = Math.floor(chunkSize * 0.5);
+                document.getElementById('overlap-size').value = overlap;
+                showNotification(`重叠大小不能大于等于块大小，已调整为 ${overlap}`, 'warning');
+            }
 
-        saveSettings();
-        showNotification('设置已保存', 'success');
+            settings.vectorQuery.chunkSize = chunkSize;
+            settings.vectorQuery.overlap = overlap;
+
+            // 其他数值参数验证
+            let scoreThreshold = parseFloat(document.getElementById('score-threshold').value);
+            if (isNaN(scoreThreshold) || scoreThreshold < 0 || scoreThreshold > 1) {
+                scoreThreshold = 0.7;
+                document.getElementById('score-threshold').value = scoreThreshold;
+                showNotification('分数阈值无效，已重置为 0.7', 'warning');
+            }
+            settings.vectorQuery.scoreThreshold = scoreThreshold;
+
+            let queryMessageCount = parseInt(document.getElementById('query-message-count').value);
+            if (isNaN(queryMessageCount) || queryMessageCount <= 0) {
+                queryMessageCount = 5;
+                document.getElementById('query-message-count').value = queryMessageCount;
+                showNotification('查询消息数量无效，已重置为 5', 'warning');
+            }
+            settings.vectorQuery.queryMessageCount = queryMessageCount;
+
+            let maxResults = parseInt(document.getElementById('max-results').value);
+            if (isNaN(maxResults) || maxResults <= 0) {
+                maxResults = 10;
+                document.getElementById('max-results').value = maxResults;
+                showNotification('最大结果数量无效，已重置为 10', 'warning');
+            }
+            settings.vectorQuery.maxResults = maxResults;
+
+            let batchSize = parseInt(document.getElementById('batch-size').value);
+            if (isNaN(batchSize) || batchSize <= 0) {
+                batchSize = 5;
+                document.getElementById('batch-size').value = batchSize;
+                showNotification('批处理大小无效，已重置为 5', 'warning');
+            }
+            settings.vectorQuery.batchSize = batchSize;
+
+            // Rerank设置
+            settings.rerank.enabled = document.getElementById('rerank-enabled').checked;
+            settings.rerank.notify = document.getElementById('rerank-notify').checked;
+            settings.rerank.apiKey = document.getElementById('rerank-api-key').value;
+            settings.rerank.model = document.getElementById('rerank-model').value;
+
+            let rerankTopN = parseInt(document.getElementById('rerank-top-n').value);
+            if (isNaN(rerankTopN) || rerankTopN <= 0) {
+                rerankTopN = 5;
+                document.getElementById('rerank-top-n').value = rerankTopN;
+                showNotification('Rerank Top N 无效，已重置为 5', 'warning');
+            }
+            settings.rerank.topN = rerankTopN;
+
+            let hybridWeight = parseFloat(document.getElementById('hybrid-weight').value);
+            if (isNaN(hybridWeight) || hybridWeight < 0 || hybridWeight > 1) {
+                hybridWeight = 0.5;
+                document.getElementById('hybrid-weight').value = hybridWeight;
+                showNotification('混合权重无效，已重置为 0.5', 'warning');
+            }
+            settings.rerank.hybridWeight = hybridWeight;
+
+            // 注入设置
+            settings.injection.template = document.getElementById('injection-template').value;
+
+            let injectionDepth = parseInt(document.getElementById('injection-depth').value);
+            if (isNaN(injectionDepth) || injectionDepth < 0) {
+                injectionDepth = 1;
+                document.getElementById('injection-depth').value = injectionDepth;
+                showNotification('注入深度无效，已重置为 1', 'warning');
+            }
+            settings.injection.depth = injectionDepth;
+            settings.injection.roleType = document.getElementById('role-type').value;
+
+            // 向量化设置
+            settings.vectorization.includeChatMessages = document.getElementById('include-chat-messages').checked;
+
+            // 验证层数范围格式
+            const layerRange = document.getElementById('layer-range').value;
+            try {
+                parseLayerRange(layerRange);
+                settings.vectorization.layerRange = layerRange;
+            } catch (error) {
+                settings.vectorization.layerRange = '1-10';
+                document.getElementById('layer-range').value = '1-10';
+                showNotification(`层数范围格式错误，已重置为 "1-10": ${error.message}`, 'warning');
+            }
+
+            settings.vectorization.messageTypes.user = document.getElementById('include-user').checked;
+            settings.vectorization.messageTypes.ai = document.getElementById('include-ai').checked;
+            settings.vectorization.messageTypes.hidden = document.getElementById('include-hidden').checked;
+
+            saveSettings();
+            showNotification('设置已保存', 'success');
+
+        } catch (error) {
+            console.error('保存设置时出错:', error);
+            showNotification(`保存设置失败: ${error.message}`, 'error');
+        }
     }
 
     /**
@@ -1030,19 +1168,58 @@
 
             // 分块处理
             const allChunks = [];
-            textContent.forEach((item, index) => {
-                const chunks = splitIntoChunks(item.text, settings.vectorQuery.chunkSize, settings.vectorQuery.overlap);
-                chunks.forEach((chunk, chunkIndex) => {
-                    allChunks.push({
-                        text: chunk.text,
-                        hash: generateHash(chunk.text),
-                        source: `message_${index}_chunk_${chunkIndex}`,
-                        timestamp: item.timestamp,
-                        isUser: item.isUser,
-                        name: item.name
-                    });
-                });
-            });
+            const maxChunksPerMessage = 1000; // 每条消息最大块数限制
+            const maxTotalChunks = 10000; // 总块数限制
+
+            for (let index = 0; index < textContent.length; index++) {
+                const item = textContent[index];
+
+                // 验证文本内容
+                if (!item.text || typeof item.text !== 'string') {
+                    console.warn(`跳过无效的消息内容，索引: ${index}`);
+                    continue;
+                }
+
+                try {
+                    const chunks = splitIntoChunks(item.text, settings.vectorQuery.chunkSize, settings.vectorQuery.overlap);
+
+                    // 检查单条消息的块数限制
+                    if (chunks.length > maxChunksPerMessage) {
+                        console.warn(`消息 ${index} 生成了过多的块 (${chunks.length})，截取前 ${maxChunksPerMessage} 个`);
+                        chunks.splice(maxChunksPerMessage);
+                    }
+
+                    // 处理每个块
+                    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+                        const chunk = chunks[chunkIndex];
+
+                        // 检查总块数限制
+                        if (allChunks.length >= maxTotalChunks) {
+                            console.warn(`达到最大块数限制 (${maxTotalChunks})，停止处理`);
+                            break;
+                        }
+
+                        allChunks.push({
+                            text: chunk.text,
+                            hash: generateHash(chunk.text),
+                            source: `message_${index}_chunk_${chunkIndex}`,
+                            timestamp: item.timestamp,
+                            isUser: item.isUser,
+                            name: item.name
+                        });
+                    }
+
+                    // 如果达到总限制，退出外层循环
+                    if (allChunks.length >= maxTotalChunks) {
+                        break;
+                    }
+
+                } catch (error) {
+                    console.error(`处理消息 ${index} 时出错:`, error);
+                    showNotification(`处理消息 ${index} 时出错: ${error.message}`, 'warning');
+                    continue;
+                }
+            }
 
             if (allChunks.length === 0) {
                 showNotification('没有生成有效的文本块', 'warning');
@@ -1076,6 +1253,41 @@
             hash = hash & hash; // 转换为32位整数
         }
         return hash.toString(36);
+    }
+
+    /**
+     * 测试 splitIntoChunks 函数
+     */
+    function testSplitIntoChunks() {
+        console.log('=== 测试 splitIntoChunks 函数 ===');
+
+        // 测试用例1：正常情况
+        const result1 = splitIntoChunks('这是一个测试文本，用来验证分块功能是否正常工作。', 10, 2);
+        console.log('测试1 - 正常分块:', result1);
+
+        // 测试用例2：overlap >= chunkSize（之前会导致无限循环的情况）
+        const result2 = splitIntoChunks('这是一个测试文本', 5, 5);
+        console.log('测试2 - overlap等于chunkSize:', result2);
+
+        // 测试用例3：overlap > chunkSize
+        const result3 = splitIntoChunks('这是一个测试文本', 5, 10);
+        console.log('测试3 - overlap大于chunkSize:', result3);
+
+        // 测试用例4：空文本
+        const result4 = splitIntoChunks('', 10, 2);
+        console.log('测试4 - 空文本:', result4);
+
+        // 测试用例5：无效参数
+        const result5 = splitIntoChunks('测试', 0, 2);
+        console.log('测试5 - 无效chunkSize:', result5);
+
+        console.log('=== 测试完成 ===');
+    }
+
+    // 在开发模式下运行测试
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+        // 延迟执行测试，确保函数已定义
+        setTimeout(testSplitIntoChunks, 1000);
     }
 
     /**
