@@ -1,7 +1,13 @@
 /**
  * SillyTavern 向量管理插件
  * 作者: 梅川晓钡锌
- * 版本: 1.0.0
+ * 版本: 1.1.0
+ *
+ * 更新内容:
+ * - 移除对 SillyTavern 内置向量 API 的依赖
+ * - 支持多种外部 API 端点（OpenAI、Azure、自定义）
+ * - 实现本地向量存储系统
+ * - 添加 API 测试和向量管理功能
  */
 
 (() => {
@@ -15,6 +21,8 @@
         // 向量查询设置
         vectorQuery: {
             enabled: true,
+            apiEndpoint: 'openai', // openai, azure, custom
+            customApiUrl: '',
             apiKey: '',
             model: 'text-embedding-ada-002',
             chunkSize: 512,
@@ -22,6 +30,7 @@
             scoreThreshold: 0.7,
             queryMessageCount: 5,
             maxResults: 10,
+            batchSize: 5,
             notifySuccess: true
         },
         
@@ -179,26 +188,140 @@
     }
 
     /**
-     * 向量查询
+     * 获取API端点URL
      */
-    async function queryVectors(text, maxResults = 10) {
+    function getApiEndpointUrl() {
+        switch (settings.vectorQuery.apiEndpoint) {
+            case 'openai':
+                return 'https://api.openai.com/v1/embeddings';
+            case 'azure':
+                // Azure OpenAI 需要自定义端点
+                return settings.vectorQuery.customApiUrl || 'https://your-resource.openai.azure.com/openai/deployments/your-deployment/embeddings?api-version=2023-05-15';
+            case 'custom':
+                return settings.vectorQuery.customApiUrl || 'https://api.openai.com/v1/embeddings';
+            default:
+                return 'https://api.openai.com/v1/embeddings';
+        }
+    }
+
+    /**
+     * 获取API请求头
+     */
+    function getApiHeaders(apiKey) {
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+
+        switch (settings.vectorQuery.apiEndpoint) {
+            case 'openai':
+            case 'custom':
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                break;
+            case 'azure':
+                headers['api-key'] = apiKey;
+                break;
+        }
+
+        return headers;
+    }
+
+    /**
+     * 获取文本向量嵌入
+     */
+    async function getTextEmbedding(text, apiKey, model) {
         try {
-            const response = await fetch('/api/vector/query', {
+            const url = getApiEndpointUrl();
+            const headers = getApiHeaders(apiKey);
+
+            const response = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 body: JSON.stringify({
-                    text: text,
-                    top_k: maxResults,
-                    threshold: settings.vectorQuery.scoreThreshold
+                    input: text,
+                    model: model || 'text-embedding-ada-002'
                 })
             });
-            
+
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const errorText = await response.text();
+                throw new Error(`API 错误 ${response.status}: ${errorText}`);
             }
-            
+
             const result = await response.json();
-            return result.results || [];
+            return result.data[0].embedding;
+        } catch (error) {
+            console.error('获取向量嵌入失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 计算余弦相似度
+     */
+    function cosineSimilarity(vecA, vecB) {
+        if (vecA.length !== vecB.length) {
+            throw new Error('向量维度不匹配');
+        }
+
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+
+        for (let i = 0; i < vecA.length; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+        }
+
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    /**
+     * 向量查询 - 使用外部API
+     */
+    async function queryVectors(queryText, maxResults = 10) {
+        try {
+            if (!settings.vectorQuery.enabled) {
+                return [];
+            }
+
+            if (!settings.vectorQuery.apiKey) {
+                throw new Error('请先配置向量查询API Key');
+            }
+
+            // 获取查询文本的向量嵌入
+            const queryEmbedding = await getTextEmbedding(
+                queryText,
+                settings.vectorQuery.apiKey,
+                settings.vectorQuery.model
+            );
+
+            // 从本地存储的向量数据中搜索
+            const storedVectors = getStoredVectors();
+            if (storedVectors.length === 0) {
+                if (settings.vectorQuery.notifySuccess) {
+                    showNotification('没有找到已向量化的内容', 'warning');
+                }
+                return [];
+            }
+
+            // 计算相似度并排序
+            const similarities = storedVectors.map(item => ({
+                ...item,
+                similarity: cosineSimilarity(queryEmbedding, item.embedding)
+            }));
+
+            // 按相似度排序并筛选
+            const results = similarities
+                .filter(item => item.similarity >= settings.vectorQuery.scoreThreshold)
+                .sort((a, b) => b.similarity - a.similarity)
+                .slice(0, maxResults);
+
+            if (settings.vectorQuery.notifySuccess && results.length > 0) {
+                showNotification(`找到 ${results.length} 个相关结果`, 'success');
+            }
+
+            return results;
         } catch (error) {
             console.error('向量查询失败:', error);
             if (settings.vectorQuery.notifySuccess) {
@@ -209,27 +332,172 @@
     }
 
     /**
-     * 插入向量
+     * 获取本地存储的向量数据
+     */
+    function getStoredVectors() {
+        const stored = localStorage.getItem(`${MODULE_NAME}_vectors`);
+        return stored ? JSON.parse(stored) : [];
+    }
+
+    /**
+     * 保存向量数据到本地存储
+     */
+    function saveVectorsToStorage(vectors) {
+        const existing = getStoredVectors();
+        const combined = [...existing, ...vectors];
+        localStorage.setItem(`${MODULE_NAME}_vectors`, JSON.stringify(combined));
+    }
+
+    /**
+     * 清空本地向量存储
+     */
+    function clearVectorStorage() {
+        localStorage.removeItem(`${MODULE_NAME}_vectors`);
+        showNotification('向量存储已清空', 'info');
+    }
+
+    /**
+     * 批量获取文本向量嵌入
+     */
+    async function batchGetEmbeddings(texts, apiKey, model, batchSize = 5) {
+        const embeddings = [];
+        const url = getApiEndpointUrl();
+        const headers = getApiHeaders(apiKey);
+
+        for (let i = 0; i < texts.length; i += batchSize) {
+            const batch = texts.slice(i, i + batchSize);
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        input: batch,
+                        model: model || 'text-embedding-ada-002'
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API 错误 ${response.status}: ${errorText}`);
+                }
+
+                const result = await response.json();
+                embeddings.push(...result.data.map(item => item.embedding));
+
+                // 显示进度
+                showNotification(`向量化进度: ${Math.min(i + batchSize, texts.length)}/${texts.length}`, 'info', 1000);
+
+                // 避免API限制，添加延迟
+                if (i + batchSize < texts.length) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            } catch (error) {
+                console.error(`批次 ${i}-${i + batchSize} 向量化失败:`, error);
+                throw error;
+            }
+        }
+
+        return embeddings;
+    }
+
+    /**
+     * 插入向量 - 使用外部API和本地存储
      */
     async function insertVectors(chunks) {
         try {
-            const response = await fetch('/api/vector/insert', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chunks })
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            if (!settings.vectorQuery.apiKey) {
+                throw new Error('请先配置向量查询API Key');
             }
-            
-            const result = await response.json();
-            return result;
+
+            // 提取文本内容
+            const texts = chunks.map(chunk => chunk.text);
+
+            // 批量获取向量嵌入
+            const embeddings = await batchGetEmbeddings(
+                texts,
+                settings.vectorQuery.apiKey,
+                settings.vectorQuery.model,
+                settings.vectorQuery.batchSize
+            );
+
+            // 创建向量数据对象
+            const vectorData = chunks.map((chunk, index) => ({
+                ...chunk,
+                embedding: embeddings[index],
+                timestamp: Date.now(),
+                id: generateHash(chunk.text + Date.now())
+            }));
+
+            // 保存到本地存储
+            saveVectorsToStorage(vectorData);
+
+            return { success: true, count: vectorData.length };
         } catch (error) {
             console.error('向量插入失败:', error);
             showNotification(`向量插入失败: ${error.message}`, 'error');
             throw error;
         }
+    }
+
+    /**
+     * 测试向量API连接
+     */
+    async function testVectorAPI() {
+        try {
+            if (!settings.vectorQuery.apiKey) {
+                showNotification('请先配置API Key', 'warning');
+                return;
+            }
+
+            showNotification('正在测试API连接...', 'info');
+
+            const testText = "这是一个测试文本";
+            const embedding = await getTextEmbedding(
+                testText,
+                settings.vectorQuery.apiKey,
+                settings.vectorQuery.model
+            );
+
+            if (embedding && embedding.length > 0) {
+                showNotification(`API连接成功！向量维度: ${embedding.length}`, 'success');
+            } else {
+                showNotification('API连接失败：返回的向量为空', 'error');
+            }
+        } catch (error) {
+            console.error('API测试失败:', error);
+            showNotification(`API连接失败: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * 显示向量统计信息
+     */
+    function showVectorStats() {
+        const vectors = getStoredVectors();
+        const totalVectors = vectors.length;
+
+        if (totalVectors === 0) {
+            showNotification('暂无向量数据', 'info');
+            return;
+        }
+
+        const totalSize = JSON.stringify(vectors).length;
+        const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
+
+        const oldestTimestamp = Math.min(...vectors.map(v => v.timestamp));
+        const newestTimestamp = Math.max(...vectors.map(v => v.timestamp));
+
+        const statsText = `
+向量统计信息:
+- 总向量数: ${totalVectors}
+- 存储大小: ${sizeInMB} MB
+- 最早创建: ${new Date(oldestTimestamp).toLocaleString()}
+- 最近创建: ${new Date(newestTimestamp).toLocaleString()}
+        `.trim();
+
+        // 显示统计信息模态框
+        showPreviewModal(statsText);
     }
 
     /**
@@ -310,6 +578,20 @@
                             </div>
 
                             <div class="vector-form-group">
+                                <label class="vector-form-label" for="query-api-endpoint">API 端点:</label>
+                                <select id="query-api-endpoint" class="vector-form-select">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="azure">Azure OpenAI</option>
+                                    <option value="custom">自定义端点</option>
+                                </select>
+                            </div>
+
+                            <div class="vector-form-group" id="custom-endpoint-group" style="display: none;">
+                                <label class="vector-form-label" for="custom-api-url">自定义API地址:</label>
+                                <input type="text" id="custom-api-url" class="vector-form-input" placeholder="https://your-api-endpoint.com/v1/embeddings">
+                            </div>
+
+                            <div class="vector-form-group">
                                 <label class="vector-form-label" for="query-api-key">API Key:</label>
                                 <input type="password" id="query-api-key" class="vector-form-input" placeholder="输入向量化API密钥">
                             </div>
@@ -348,6 +630,18 @@
                             <div class="vector-form-group">
                                 <label class="vector-form-label" for="max-results">最大结果数:</label>
                                 <input type="number" id="max-results" class="vector-form-input" min="1" max="100" value="10">
+                            </div>
+
+                            <div class="vector-form-group">
+                                <label class="vector-form-label" for="batch-size">批处理大小:</label>
+                                <input type="number" id="batch-size" class="vector-form-input" min="1" max="20" value="5">
+                                <small style="color: #666;">每次API调用处理的文本数量</small>
+                            </div>
+
+                            <div class="vector-form-group">
+                                <button class="vector-btn" onclick="testVectorAPI()">测试API连接</button>
+                                <button class="vector-btn" onclick="showVectorStats()">查看向量统计</button>
+                                <button class="vector-btn" onclick="clearVectorStorage()" style="background-color: #dc3545; color: white;">清空向量存储</button>
                             </div>
                         </div>
 
@@ -491,6 +785,20 @@
     }
 
     /**
+     * 切换自定义端点输入框显示
+     */
+    function toggleCustomEndpointInput() {
+        const endpoint = document.getElementById('query-api-endpoint').value;
+        const customGroup = document.getElementById('custom-endpoint-group');
+
+        if (endpoint === 'custom' || endpoint === 'azure') {
+            customGroup.style.display = 'block';
+        } else {
+            customGroup.style.display = 'none';
+        }
+    }
+
+    /**
      * 绑定模态框事件
      */
     function bindModalEvents() {
@@ -502,6 +810,12 @@
                 switchTab(targetTab);
             });
         });
+
+        // API端点切换事件
+        const endpointSelect = document.getElementById('query-api-endpoint');
+        if (endpointSelect) {
+            endpointSelect.addEventListener('change', toggleCustomEndpointInput);
+        }
 
         // 点击模态框外部关闭
         const modal = document.getElementById('vector-manager-modal');
@@ -537,6 +851,8 @@
 
         // 向量查询设置
         document.getElementById('query-enabled').checked = s.vectorQuery.enabled;
+        document.getElementById('query-api-endpoint').value = s.vectorQuery.apiEndpoint;
+        document.getElementById('custom-api-url').value = s.vectorQuery.customApiUrl;
         document.getElementById('query-api-key').value = s.vectorQuery.apiKey;
         document.getElementById('query-model').value = s.vectorQuery.model;
         document.getElementById('query-notify').checked = s.vectorQuery.notifySuccess;
@@ -545,6 +861,10 @@
         document.getElementById('score-threshold').value = s.vectorQuery.scoreThreshold;
         document.getElementById('query-message-count').value = s.vectorQuery.queryMessageCount;
         document.getElementById('max-results').value = s.vectorQuery.maxResults;
+        document.getElementById('batch-size').value = s.vectorQuery.batchSize;
+
+        // 显示/隐藏自定义端点输入框
+        toggleCustomEndpointInput();
 
         // Rerank设置
         document.getElementById('rerank-enabled').checked = s.rerank.enabled;
@@ -573,6 +893,8 @@
     function saveSettingsFromForm() {
         // 向量查询设置
         settings.vectorQuery.enabled = document.getElementById('query-enabled').checked;
+        settings.vectorQuery.apiEndpoint = document.getElementById('query-api-endpoint').value;
+        settings.vectorQuery.customApiUrl = document.getElementById('custom-api-url').value;
         settings.vectorQuery.apiKey = document.getElementById('query-api-key').value;
         settings.vectorQuery.model = document.getElementById('query-model').value;
         settings.vectorQuery.notifySuccess = document.getElementById('query-notify').checked;
@@ -581,6 +903,7 @@
         settings.vectorQuery.scoreThreshold = parseFloat(document.getElementById('score-threshold').value);
         settings.vectorQuery.queryMessageCount = parseInt(document.getElementById('query-message-count').value);
         settings.vectorQuery.maxResults = parseInt(document.getElementById('max-results').value);
+        settings.vectorQuery.batchSize = parseInt(document.getElementById('batch-size').value);
 
         // Rerank设置
         settings.rerank.enabled = document.getElementById('rerank-enabled').checked;
@@ -883,6 +1206,9 @@
     window.startVectorization = startVectorization;
     window.showPreview = showPreview;
     window.closePreviewModal = closePreviewModal;
+    window.testVectorAPI = testVectorAPI;
+    window.showVectorStats = showVectorStats;
+    window.clearVectorStorage = clearVectorStorage;
 
     // 等待SillyTavern加载完成后初始化
     if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {

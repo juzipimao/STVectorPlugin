@@ -10,9 +10,13 @@
 ## 主要功能
 
 ### 🔍 向量查询区域
+- 多种API端点支持（OpenAI、Azure OpenAI、自定义端点）
 - API Key 配置和模型选择
 - 可调节的块大小、重叠和分数阈值
 - 查询消息数量和结果数量控制
+- 批处理大小配置
+- API连接测试功能
+- 向量存储统计和管理
 - 查询成功通知开关
 
 ### 🔄 Rerank 区域
@@ -75,6 +79,30 @@
 
 向量查询会在聊天过程中自动触发，根据最近的消息内容查找相关的向量化内容，并根据配置进行 Rerank 处理和内容注入。
 
+### API 端点配置
+
+插件支持多种向量化 API 端点：
+
+#### OpenAI API
+- 端点：`https://api.openai.com/v1/embeddings`
+- 认证：Bearer Token
+- 支持模型：text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large
+
+#### Azure OpenAI
+- 端点：需要配置完整的 Azure 端点 URL
+- 认证：API Key
+- 格式：`https://your-resource.openai.azure.com/openai/deployments/your-deployment/embeddings?api-version=2023-05-15`
+
+#### 自定义端点
+- 支持任何兼容 OpenAI Embeddings API 格式的服务
+- 可配置自定义 URL 和认证方式
+
+### 本地存储
+
+- 向量数据存储在浏览器本地存储中
+- 支持向量统计查看和存储管理
+- 可以清空向量存储重新开始
+
 ## 配置说明
 
 ### 向量查询参数
@@ -96,9 +124,12 @@
 ## 依赖要求
 
 - SillyTavern 最新版本
-- 启用 vectors 扩展
-- 有效的向量化 API（如 OpenAI Embeddings）
+- 有效的向量化 API（支持以下任一）：
+  - OpenAI Embeddings API
+  - Azure OpenAI Service
+  - 兼容 OpenAI 格式的自定义 API
 - （可选）Cohere Rerank API
+- 现代浏览器支持（用于本地存储）
 
 ## 故障排除
 
@@ -128,6 +159,16 @@ console.log(SillyTavern.getContext().extensionSettings['vector-manager']);
 ```
 
 ## 更新日志
+
+### v1.1.0 (2025-07-15)
+- 🚀 **重大更新**：移除对 SillyTavern 内置向量 API 的依赖
+- ✨ 新增多种 API 端点支持（OpenAI、Azure OpenAI、自定义端点）
+- 💾 实现本地向量存储系统
+- 🔧 添加 API 连接测试功能
+- 📊 新增向量存储统计和管理功能
+- ⚡ 优化批处理性能，支持自定义批处理大小
+- 🛠️ 改进错误处理和用户反馈
+- 📱 增强响应式界面设计
 
 ### v1.0.0 (2025-07-15)
 - 初始版本发布
