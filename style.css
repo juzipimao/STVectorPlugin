@@ -19,15 +19,15 @@
 }
 
 .vector-modal-content {
-    background: var(--SmartThemeBodyColor, #ffffff);
-    border: 2px solid var(--SmartThemeBorderColor, #dee2e6);
+    background: #1a1a1a !important;
+    border: 2px solid #444444 !important;
     border-radius: 12px;
     width: 90%;
     max-width: 800px;
     max-height: 90vh;
     overflow-y: auto;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    color: var(--SmartThemeEmColor, #212529);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+    color: #ffffff !important;
 }
 
 /* 模态框标题栏 */
@@ -36,16 +36,16 @@
     justify-content: space-between;
     align-items: center;
     padding: 18px 24px;
-    border-bottom: 2px solid var(--SmartThemeBorderColor, #dee2e6);
-    background: var(--SmartThemeQuoteColor, #f8f9fa);
+    border-bottom: 2px solid #444444 !important;
+    background: #2a2a2a !important;
     border-radius: 12px 12px 0 0;
 }
 
 .vector-modal-title {
     font-size: 20px;
     font-weight: 600;
-    color: var(--SmartThemeEmColor, #212529);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .vector-modal-close {
@@ -73,8 +73,8 @@
 /* 标签页导航 */
 .vector-tabs {
     display: flex;
-    border-bottom: 2px solid var(--SmartThemeBorderColor, #dee2e6);
-    background: var(--SmartThemeQuoteColor, #f8f9fa);
+    border-bottom: 2px solid #444444 !important;
+    background: #2a2a2a !important;
 }
 
 .vector-tab {
@@ -83,7 +83,7 @@
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--SmartThemeEmColor, #495057);
+    color: #cccccc !important;
     font-size: 15px;
     font-weight: 500;
     transition: all 0.3s ease;
@@ -91,21 +91,21 @@
 }
 
 .vector-tab:hover {
-    background-color: var(--SmartThemeBorderColor, rgba(0, 123, 255, 0.1));
-    color: var(--SmartThemeEmColor, #007bff);
+    background-color: #3a3a3a !important;
+    color: #ffffff !important;
 }
 
 .vector-tab.active {
-    background-color: var(--SmartThemeBodyColor, #ffffff);
-    color: var(--SmartThemeEmColor, #007bff);
-    border-bottom: 3px solid #007bff;
+    background-color: #1a1a1a !important;
+    color: #00bfff !important;
+    border-bottom: 3px solid #00bfff;
     font-weight: 600;
 }
 
 /* 内容区域 */
 .vector-modal-body {
     padding: 24px;
-    background: var(--SmartThemeBodyColor, #ffffff);
+    background: #1a1a1a !important;
 }
 
 .vector-tab-content {
@@ -125,7 +125,7 @@
     display: block;
     margin-bottom: 8px;
     font-weight: 600;
-    color: var(--SmartThemeEmColor, #343a40);
+    color: #ffffff !important;
     font-size: 14px;
 }
 
@@ -134,10 +134,10 @@
 .vector-form-textarea {
     width: 100%;
     padding: 12px 16px;
-    border: 2px solid var(--SmartThemeBorderColor, #ced4da);
+    border: 2px solid #444444 !important;
     border-radius: 6px;
-    background: var(--SmartThemeBodyColor, #ffffff);
-    color: var(--SmartThemeEmColor, #495057);
+    background: #2a2a2a !important;
+    color: #ffffff !important;
     font-size: 14px;
     transition: all 0.2s ease;
     box-sizing: border-box;
@@ -147,8 +147,8 @@
 .vector-form-select:focus,
 .vector-form-textarea:focus {
     outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+    border-color: #00bfff !important;
+    box-shadow: 0 0 0 3px rgba(0, 191, 255, 0.2) !important;
 }
 
 .vector-form-textarea {
@@ -161,7 +161,7 @@
 .vector-form-label input[type="checkbox"] {
     margin-right: 8px;
     transform: scale(1.2);
-    accent-color: #007bff;
+    accent-color: #00bfff;
 }
 
 .vector-form-label {
@@ -169,10 +169,11 @@
     align-items: center;
     cursor: pointer;
     padding: 4px 0;
+    color: #ffffff !important;
 }
 
 .vector-form-label:hover {
-    color: #007bff;
+    color: #00bfff !important;
 }
 
 /* 小文本样式 */
@@ -180,7 +181,7 @@
     display: block;
     margin-top: 6px;
     font-size: 12px;
-    color: var(--SmartThemeEmColor, #6c757d);
+    color: #cccccc !important;
     font-style: italic;
     line-height: 1.4;
 }
@@ -237,10 +238,10 @@ input:checked + .vector-slider:before {
 /* 按钮样式 */
 .vector-btn {
     padding: 10px 20px;
-    border: 2px solid var(--SmartThemeBorderColor, #ced4da);
+    border: 2px solid #444444 !important;
     border-radius: 6px;
-    background: var(--SmartThemeQuoteColor, #f8f9fa);
-    color: var(--SmartThemeEmColor, #495057);
+    background: #2a2a2a !important;
+    color: #ffffff !important;
     cursor: pointer;
     font-size: 14px;
     font-weight: 500;
@@ -251,31 +252,31 @@ input:checked + .vector-slider:before {
 }
 
 .vector-btn:hover {
-    background-color: var(--SmartThemeBorderColor, #e9ecef);
+    background-color: #3a3a3a !important;
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .vector-btn-primary {
-    background-color: #007bff;
-    color: white;
-    border-color: #007bff;
+    background-color: #007bff !important;
+    color: white !important;
+    border-color: #007bff !important;
 }
 
 .vector-btn-primary:hover {
-    background-color: #0056b3;
-    border-color: #0056b3;
+    background-color: #0056b3 !important;
+    border-color: #0056b3 !important;
 }
 
 .vector-btn-success {
-    background-color: #28a745;
-    color: white;
-    border-color: #28a745;
+    background-color: #28a745 !important;
+    color: white !important;
+    border-color: #28a745 !important;
 }
 
 .vector-btn-success:hover {
-    background-color: #1e7e34;
-    border-color: #1e7e34;
+    background-color: #1e7e34 !important;
+    border-color: #1e7e34 !important;
 }
 
 .vector-btn:disabled {
@@ -288,21 +289,21 @@ input:checked + .vector-slider:before {
 .vector-results {
     max-height: 350px;
     overflow-y: auto;
-    border: 2px solid var(--SmartThemeBorderColor, #dee2e6);
+    border: 2px solid #444444 !important;
     border-radius: 8px;
     margin-top: 12px;
-    background: var(--SmartThemeBodyColor, #ffffff);
+    background: #2a2a2a !important;
 }
 
 .vector-result-item {
     padding: 16px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, #e9ecef);
-    background: var(--SmartThemeBodyColor, #ffffff);
+    border-bottom: 1px solid #444444 !important;
+    background: #2a2a2a !important;
     transition: background-color 0.2s ease;
 }
 
 .vector-result-item:hover {
-    background-color: var(--SmartThemeQuoteColor, #f8f9fa);
+    background-color: #3a3a3a !important;
 }
 
 .vector-result-item:last-child {
@@ -311,13 +312,13 @@ input:checked + .vector-slider:before {
 
 .vector-result-score {
     font-weight: 600;
-    color: #007bff;
+    color: #00bfff !important;
     margin-right: 12px;
     font-size: 14px;
 }
 
 .vector-result-text {
-    color: var(--SmartThemeEmColor, #495057);
+    color: #ffffff !important;
     font-size: 14px;
     line-height: 1.5;
     margin-top: 4px;
@@ -326,8 +327,8 @@ input:checked + .vector-slider:before {
 /* 底部按钮区域 */
 .vector-modal-footer {
     padding: 20px 24px;
-    border-top: 2px solid var(--SmartThemeBorderColor, #dee2e6);
-    background: var(--SmartThemeQuoteColor, #f8f9fa);
+    border-top: 2px solid #444444 !important;
+    background: #2a2a2a !important;
     display: flex;
     justify-content: flex-end;
     gap: 12px;
@@ -423,15 +424,15 @@ input:checked + .vector-slider:before {
 }
 
 .vector-preview-content {
-    background: var(--SmartThemeBodyColor, #ffffff);
-    border: 2px solid var(--SmartThemeBorderColor, #dee2e6);
+    background: #1a1a1a !important;
+    border: 2px solid #444444 !important;
     border-radius: 12px;
     width: 85%;
     max-width: 700px;
     max-height: 85vh;
     overflow-y: auto;
     padding: 24px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
 }
 
 .vector-preview-text {
@@ -439,101 +440,96 @@ input:checked + .vector-slider:before {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
     line-height: 1.6;
-    color: var(--SmartThemeEmColor, #495057);
-    background: var(--SmartThemeQuoteColor, #f8f9fa);
+    color: #ffffff !important;
+    background: #2a2a2a !important;
     padding: 16px;
     border-radius: 6px;
-    border: 1px solid var(--SmartThemeBorderColor, #e9ecef);
+    border: 1px solid #444444 !important;
 }
 
-/* 暗色主题适配 */
-@media (prefers-color-scheme: dark) {
-    .vector-modal-content {
-        background: #2d3748;
-        border-color: #4a5568;
-        color: #e2e8f0;
-    }
+/* 强制黑白主题 - 覆盖所有可能的主题变量 */
+.vector-modal-content * {
+    color: inherit;
+}
 
-    .vector-modal-header,
-    .vector-modal-footer {
-        background: #1a202c;
-        border-color: #4a5568;
-    }
+/* 确保所有文本输入框都是黑色背景白色文字 */
+.vector-form-input::placeholder,
+.vector-form-select::placeholder,
+.vector-form-textarea::placeholder {
+    color: #888888 !important;
+}
 
-    .vector-modal-title {
-        color: #e2e8f0;
-    }
+/* 滚动条样式 */
+.vector-modal-content::-webkit-scrollbar,
+.vector-results::-webkit-scrollbar,
+.vector-preview-content::-webkit-scrollbar {
+    width: 8px;
+}
 
-    .vector-tabs {
-        background: #1a202c;
-        border-color: #4a5568;
-    }
+.vector-modal-content::-webkit-scrollbar-track,
+.vector-results::-webkit-scrollbar-track,
+.vector-preview-content::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
 
-    .vector-tab {
-        color: #a0aec0;
-    }
+.vector-modal-content::-webkit-scrollbar-thumb,
+.vector-results::-webkit-scrollbar-thumb,
+.vector-preview-content::-webkit-scrollbar-thumb {
+    background: #444444;
+    border-radius: 4px;
+}
 
-    .vector-tab:hover {
-        background-color: rgba(74, 85, 104, 0.3);
-        color: #e2e8f0;
-    }
+.vector-modal-content::-webkit-scrollbar-thumb:hover,
+.vector-results::-webkit-scrollbar-thumb:hover,
+.vector-preview-content::-webkit-scrollbar-thumb:hover {
+    background: #555555;
+}
 
-    .vector-tab.active {
-        background-color: #2d3748;
-        color: #63b3ed;
-    }
+/* 确保选择框选项也是黑色背景 */
+.vector-form-select option {
+    background: #2a2a2a !important;
+    color: #ffffff !important;
+}
 
-    .vector-form-input,
-    .vector-form-select,
-    .vector-form-textarea {
-        background: #2d3748;
-        border-color: #4a5568;
-        color: #e2e8f0;
-    }
+/* 确保所有div和span都继承正确的颜色 */
+.vector-modal-body div,
+.vector-modal-body span,
+.vector-modal-body p {
+    color: #ffffff !important;
+}
 
-    .vector-form-input:focus,
-    .vector-form-select:focus,
-    .vector-form-textarea:focus {
-        border-color: #63b3ed;
-        box-shadow: 0 0 0 3px rgba(99, 179, 237, 0.1);
-    }
+/* 开关滑块样式调整 */
+.vector-slider {
+    background-color: #444444 !important;
+    border-color: #666666 !important;
+}
 
-    .vector-form-label {
-        color: #e2e8f0;
-    }
+input:checked + .vector-slider {
+    background-color: #00bfff !important;
+    border-color: #00bfff !important;
+}
 
-    .vector-btn {
-        background: #4a5568;
-        border-color: #4a5568;
-        color: #e2e8f0;
-    }
+/* 通知样式调整 */
+.vector-notification {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
 
-    .vector-btn:hover {
-        background: #2d3748;
-    }
+.vector-notification.success {
+    background-color: #28a745 !important;
+    color: #ffffff !important;
+}
 
-    .vector-results {
-        background: #2d3748;
-        border-color: #4a5568;
-    }
+.vector-notification.error {
+    background-color: #dc3545 !important;
+    color: #ffffff !important;
+}
 
-    .vector-result-item {
-        background: #2d3748;
-        border-color: #4a5568;
-    }
+.vector-notification.warning {
+    background-color: #ffc107 !important;
+    color: #000000 !important;
+}
 
-    .vector-result-item:hover {
-        background: #1a202c;
-    }
-
-    .vector-preview-content {
-        background: #2d3748;
-        border-color: #4a5568;
-    }
-
-    .vector-preview-text {
-        background: #1a202c;
-        border-color: #4a5568;
-        color: #e2e8f0;
-    }
+.vector-notification.info {
+    background-color: #17a2b8 !important;
+    color: #ffffff !important;
 }

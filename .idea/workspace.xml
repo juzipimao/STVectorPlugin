@@ -6,8 +6,8 @@
   <component name="ChangeListManager">
     <list default="true" id="bdbdc1b6-99d6-44a6-ac60-ce6ef107a4f9" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/index.js" beforeDir="false" afterPath="$PROJECT_DIR$/index.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/style.css" beforeDir="false" afterPath="$PROJECT_DIR$/style.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test.html" beforeDir="false" afterPath="$PROJECT_DIR$/test.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -140,7 +140,23 @@
       <option name="project" value="LOCAL" />
       <updated>1752598676789</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="UI优化">
+      <option name="closed" value="true" />
+      <created>1752599619224</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1752599619224</updated>
+    </task>
+    <task id="LOCAL-00007" summary="版本号修改">
+      <option name="closed" value="true" />
+      <created>1752599674232</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1752599674232</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -172,6 +188,8 @@
     <MESSAGE value="初始化" />
     <MESSAGE value="添加插件" />
     <MESSAGE value="外部api" />
-    <option name="LAST_COMMIT_MESSAGE" value="外部api" />
+    <MESSAGE value="UI优化" />
+    <MESSAGE value="版本号修改" />
+    <option name="LAST_COMMIT_MESSAGE" value="版本号修改" />
   </component>
 </project>
