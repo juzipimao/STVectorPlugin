@@ -7,8 +7,8 @@
     "js": "index.js",
     "css": "style.css",
     "author": "梅川晓钡锌",
-    "version": "1.0.0",
-    "homePage": "https://github.com/your-username/vector-manager-plugin",
+    "version": "1.0.2",
+    "homePage": "https://github.com/juzipimao/STVectorPlugin",
     "auto_update": true,
     "description": "为 SillyTavern 提供强大的向量查询、Rerank 和内容管理功能"
 }
