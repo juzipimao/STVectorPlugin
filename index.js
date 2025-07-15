@@ -1435,7 +1435,365 @@
         // 添加设置按钮
         addSettingsButton();
 
+        // 注册事件监听器
+        registerEventListeners();
+
         console.log('向量管理插件已初始化');
+    }
+
+    /**
+     * 注册事件监听器
+     */
+    function registerEventListeners() {
+        if (!context || !context.eventSource) {
+            console.error('向量插件: 无法获取事件源');
+            return;
+        }
+
+        // 监听生成开始前事件，进行向量查询和注入
+        context.eventSource.on(context.eventTypes.GENERATION_AFTER_COMMANDS, handleGenerationAfterCommands);
+
+        // 监听聊天变化事件
+        context.eventSource.on(context.eventTypes.CHAT_CHANGED, handleChatChanged);
+
+        console.log('向量插件: 事件监听器已注册');
+    }
+
+    /**
+     * 处理生成开始前的向量查询和注入
+     */
+    async function handleGenerationAfterCommands(type, params, dryRun) {
+        try {
+            // 如果是干运行或者向量查询未启用，跳过
+            if (dryRun || !settings.vectorQuery.enabled) {
+                return;
+            }
+
+            // 跳过某些特殊类型的生成
+            if (['quiet', 'impersonate'].includes(type)) {
+                return;
+            }
+
+            console.log('向量插件: 开始向量查询流程', { type, params });
+
+            // 执行向量查询和注入
+            await performVectorQueryAndInjection();
+
+        } catch (error) {
+            console.error('向量插件: 生成前处理失败', error);
+            if (settings.vectorQuery.notifySuccess) {
+                showNotification(`向量查询失败: ${error.message}`, 'error');
+            }
+        }
+    }
+
+    /**
+     * 处理聊天变化事件
+     */
+    function handleChatChanged(chatId) {
+        console.log('向量插件: 聊天已切换', chatId);
+        // 可以在这里做一些聊天切换后的初始化工作
+    }
+
+    /**
+     * 执行向量查询和注入的完整流程
+     */
+    async function performVectorQueryAndInjection() {
+        try {
+            // 1. 获取最近的聊天消息作为查询文本
+            const queryMessages = getRecentMessages(settings.vectorQuery.queryMessageCount);
+            if (queryMessages.length === 0) {
+                console.log('向量插件: 没有可用的查询消息');
+                return;
+            }
+
+            // 2. 提取查询文本
+            const queryTextContent = extractTextContent(queryMessages);
+            const queryText = queryTextContent.map(item => item.text).join(' ');
+
+            if (!queryText.trim()) {
+                console.log('向量插件: 查询文本为空');
+                return;
+            }
+
+            console.log('向量插件: 查询文本', queryText.substring(0, 200) + '...');
+
+            // 3. 执行向量查询
+            const vectorResults = await queryVectors(queryText);
+
+            if (!vectorResults || vectorResults.length === 0) {
+                console.log('向量插件: 没有找到相关的向量结果');
+                if (settings.vectorQuery.notifySuccess) {
+                    showNotification('向量查询完成，但没有找到相关内容', 'info');
+                }
+                return;
+            }
+
+            console.log(`向量插件: 找到 ${vectorResults.length} 个向量结果`);
+
+            // 4. 应用分数阈值筛选
+            const filteredResults = vectorResults.filter(result =>
+                result.score >= settings.vectorQuery.scoreThreshold
+            );
+
+            if (filteredResults.length === 0) {
+                console.log('向量插件: 所有结果都低于分数阈值');
+                if (settings.vectorQuery.notifySuccess) {
+                    showNotification('向量查询完成，但所有结果都低于分数阈值', 'info');
+                }
+                return;
+            }
+
+            // 5. 限制结果数量
+            const limitedResults = filteredResults.slice(0, settings.vectorQuery.maxResults);
+
+            // 6. Rerank 处理（如果启用）
+            let finalResults = limitedResults;
+            if (settings.rerank.enabled && settings.rerank.apiKey) {
+                try {
+                    finalResults = await processRerank(queryText, limitedResults);
+                    console.log(`向量插件: Rerank 处理完成，最终结果数量: ${finalResults.length}`);
+                } catch (error) {
+                    console.warn('向量插件: Rerank 处理失败，使用原始结果', error);
+                    if (settings.rerank.notify) {
+                        showNotification(`Rerank 处理失败: ${error.message}`, 'warning');
+                    }
+                }
+            }
+
+            // 7. 注入到聊天上下文
+            await injectVectorResults(finalResults);
+
+            // 8. 成功通知
+            if (settings.vectorQuery.notifySuccess) {
+                showNotification(`向量查询成功，注入了 ${finalResults.length} 个相关内容`, 'success');
+            }
+
+        } catch (error) {
+            console.error('向量插件: 向量查询和注入流程失败', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 执行向量查询
+     */
+    async function queryVectors(queryText) {
+        try {
+            if (!settings.vectorQuery.apiKey) {
+                throw new Error('请先配置向量查询API Key');
+            }
+
+            // 1. 获取查询文本的向量嵌入
+            const queryEmbedding = await batchGetEmbeddings(
+                [queryText],
+                settings.vectorQuery.apiKey,
+                settings.vectorQuery.model,
+                1
+            );
+
+            if (!queryEmbedding || queryEmbedding.length === 0) {
+                throw new Error('无法获取查询文本的向量嵌入');
+            }
+
+            // 2. 从本地存储加载向量数据
+            const storedVectors = getStoredVectors();
+
+            if (!storedVectors || storedVectors.length === 0) {
+                console.log('向量插件: 本地没有存储的向量数据');
+                return [];
+            }
+
+            // 3. 计算相似度并排序
+            const results = storedVectors.map(vectorData => {
+                const similarity = calculateCosineSimilarity(queryEmbedding[0], vectorData.embedding);
+                return {
+                    text: vectorData.text,
+                    score: similarity,
+                    source: vectorData.source,
+                    timestamp: vectorData.timestamp,
+                    name: vectorData.name,
+                    isUser: vectorData.isUser
+                };
+            });
+
+            // 4. 按相似度排序（降序）
+            results.sort((a, b) => b.score - a.score);
+
+            console.log(`向量插件: 查询完成，找到 ${results.length} 个结果`);
+            return results;
+
+        } catch (error) {
+            console.error('向量查询失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 计算余弦相似度
+     */
+    function calculateCosineSimilarity(vecA, vecB) {
+        if (!vecA || !vecB || vecA.length !== vecB.length) {
+            return 0;
+        }
+
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+
+        for (let i = 0; i < vecA.length; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+        }
+
+        if (normA === 0 || normB === 0) {
+            return 0;
+        }
+
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    /**
+     * 将向量查询结果注入到聊天上下文
+     */
+    async function injectVectorResults(results) {
+        try {
+            if (!results || results.length === 0) {
+                return;
+            }
+
+            // 1. 格式化注入内容
+            const injectionContent = formatInjectionContent(results);
+
+            if (!injectionContent.trim()) {
+                console.log('向量插件: 注入内容为空');
+                return;
+            }
+
+            // 2. 使用 SillyTavern 的扩展提示系统进行注入
+            if (typeof context.setExtensionPrompt === 'function') {
+                // 使用官方扩展提示系统
+                // setExtensionPrompt(key, value, position, depth, scan, role, filter)
+                const position = context.extension_prompt_types ? context.extension_prompt_types.IN_PROMPT : 0;
+                const role = getRoleFromSettings();
+
+                context.setExtensionPrompt(
+                    'VECTOR_MANAGER',
+                    injectionContent,
+                    position,
+                    settings.injection.depth,
+                    false, // scan
+                    role,
+                    null // filter
+                );
+                console.log('向量插件: 使用扩展提示系统注入内容');
+            } else {
+                // 备用方案：直接注入到聊天历史
+                await injectToChat(injectionContent);
+                console.log('向量插件: 使用备用方案注入内容');
+            }
+
+        } catch (error) {
+            console.error('向量插件: 注入失败', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 格式化注入内容
+     */
+    function formatInjectionContent(results) {
+        const formattedResults = results.map((result, index) => {
+            const scorePercent = Math.round(result.score * 100);
+            const timeStr = result.timestamp ? new Date(result.timestamp).toLocaleString() : '未知时间';
+            const speaker = result.name || (result.isUser ? 'User' : 'Assistant');
+
+            return `[${index + 1}] (相似度: ${scorePercent}%, 来源: ${speaker}, 时间: ${timeStr})\n${result.text}`;
+        }).join('\n\n');
+
+        // 应用用户自定义的注入模板
+        const template = settings.injection.template || '相关内容：\n{{text}}';
+        return template.replace('{{text}}', formattedResults);
+    }
+
+    /**
+     * 备用注入方案：直接注入到聊天历史
+     */
+    async function injectToChat(content) {
+        try {
+            const chat = context.chat;
+            if (!chat || !Array.isArray(chat)) {
+                throw new Error('无法获取聊天历史');
+            }
+
+            // 计算注入位置
+            const injectionIndex = Math.max(0, chat.length - settings.injection.depth);
+
+            // 创建注入消息
+            const injectionMessage = {
+                name: getInjectionRoleName(),
+                is_user: settings.injection.roleType === 'user',
+                is_system: settings.injection.roleType === 'system',
+                send_date: Date.now(),
+                mes: content,
+                extra: {
+                    isVectorInjection: true,
+                    vectorManagerPlugin: true
+                }
+            };
+
+            // 插入到指定位置
+            chat.splice(injectionIndex, 0, injectionMessage);
+
+            // 保存聊天记录
+            if (typeof context.saveChatDebounced === 'function') {
+                context.saveChatDebounced();
+            }
+
+            console.log(`向量插件: 内容已注入到位置 ${injectionIndex}`);
+
+        } catch (error) {
+            console.error('向量插件: 备用注入方案失败', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 获取注入角色名称
+     */
+    function getInjectionRoleName() {
+        switch (settings.injection.roleType) {
+            case 'system':
+                return 'System';
+            case 'user':
+                return context.name1 || 'User';
+            case 'character':
+                return context.name2 || 'Assistant';
+            default:
+                return 'Vector Manager';
+        }
+    }
+
+    /**
+     * 根据设置获取扩展提示角色
+     */
+    function getRoleFromSettings() {
+        if (!context.extension_prompt_roles) {
+            return 0; // 默认为 SYSTEM
+        }
+
+        switch (settings.injection.roleType) {
+            case 'system':
+                return context.extension_prompt_roles.SYSTEM;
+            case 'user':
+                return context.extension_prompt_roles.USER;
+            case 'character':
+            case 'assistant':
+                return context.extension_prompt_roles.ASSISTANT;
+            default:
+                return context.extension_prompt_roles.SYSTEM;
+        }
     }
 
     // 全局函数，供HTML调用
