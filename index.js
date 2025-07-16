@@ -54,7 +54,8 @@
         // 向量化设置
         vectorization: {
             includeChatMessages: true,
-            layerRange: '1-10',
+            layerStart: 1,
+            layerEnd: 10,
             messageTypes: {
                 user: true,
                 ai: true,
@@ -376,28 +377,283 @@
     }
 
     /**
-     * 获取本地存储的向量数据
+     * 调试函数：检查当前上下文状态
      */
-    function getStoredVectors() {
-        const stored = localStorage.getItem(`${MODULE_NAME}_vectors`);
-        return stored ? JSON.parse(stored) : [];
+    function debugContextState() {
+        console.log('=== 向量插件上下文调试信息 ===');
+        console.log('context:', context);
+        console.log('context.characterId:', context.characterId);
+        console.log('context.characters:', context.characters);
+        console.log('context.chat:', context.chat);
+        console.log('context.chatId:', context.chatId);
+
+        // 尝试直接访问全局变量
+        if (typeof window !== 'undefined' && window.SillyTavern) {
+            const globalContext = window.SillyTavern.getContext();
+            console.log('全局上下文 characterId:', globalContext.characterId);
+        }
     }
 
     /**
-     * 保存向量数据到本地存储
+     * 详细调试函数：分析层数范围和向量数据库问题
      */
-    function saveVectorsToStorage(vectors) {
-        const existing = getStoredVectors();
-        const combined = [...existing, ...vectors];
-        localStorage.setItem(`${MODULE_NAME}_vectors`, JSON.stringify(combined));
+    function debugDetailedIssues() {
+        console.log('=== 详细问题调试 ===');
+
+        // 1. 层数范围计算调试
+        const startLayer = settings.vectorization.layerStart;
+        const endLayer = settings.vectorization.layerEnd;
+        const totalMessages = context.chat ? context.chat.length : 0;
+
+        console.log('--- 层数范围计算调试 ---');
+        console.log('用户输入层数范围:', `${startLayer}-${endLayer}`);
+        console.log('总消息数:', totalMessages);
+
+        if (totalMessages > 0) {
+            // 使用修复后的计算逻辑
+            const startIndex = Math.max(0, startLayer - 1);
+            const endIndex = Math.min(totalMessages, endLayer);
+            console.log('修复后的索引范围:', `${startIndex}-${endIndex}`);
+            console.log('实际获取的消息数量:', endIndex - startIndex);
+            console.log('期望获取的消息数量:', Math.min(endLayer - startLayer + 1, totalMessages));
+
+            // 显示具体的消息信息
+            if (context.chat && context.chat.length > 0) {
+                const messages = context.chat.slice(startIndex, endIndex);
+                console.log('获取到的消息示例:');
+                messages.slice(0, 3).forEach((msg, idx) => {
+                    console.log(`  消息${startIndex + idx + 1}: ${msg.mes ? msg.mes.substring(0, 50) + '...' : '(空消息)'}`);
+                });
+                if (messages.length > 3) {
+                    console.log(`  ... 还有 ${messages.length - 3} 条消息`);
+                }
+            }
+        }
+
+        // 2. 向量数据库调试
+        console.log('--- 向量数据库调试 ---');
+        const currentCharId = getCurrentCharacterId();
+        const currentChatId = getCurrentChatId();
+        console.log('当前角色ID:', currentCharId);
+        console.log('当前聊天ID:', currentChatId);
+
+        if (currentCharId && context.characters[currentCharId]) {
+            const character = context.characters[currentCharId];
+            console.log('角色数据存在:', !!character);
+            console.log('角色扩展数据存在:', !!(character.data && character.data.extensions));
+
+            if (character.data && character.data.extensions && character.data.extensions.vector_manager_data) {
+                const vectorData = character.data.extensions.vector_manager_data;
+                console.log('向量数据存在:', !!vectorData);
+                console.log('保存的聊天ID:', vectorData.chatId);
+                console.log('当前聊天ID:', currentChatId);
+                console.log('聊天ID匹配:', vectorData.chatId === currentChatId);
+                console.log('保存的向量数量:', vectorData.vectors ? vectorData.vectors.length : 0);
+                console.log('向量数据时间戳:', new Date(vectorData.timestamp).toLocaleString());
+            } else {
+                console.log('未找到向量数据');
+            }
+        }
+
+        console.log('=== 调试完成 ===');
     }
 
     /**
-     * 清空本地向量存储
+     * 获取当前角色ID（带容错处理）
      */
-    function clearVectorStorage() {
-        localStorage.removeItem(`${MODULE_NAME}_vectors`);
-        showNotification('向量存储已清空', 'info');
+    function getCurrentCharacterId() {
+        // 首先尝试从上下文获取
+        if (context.characterId !== undefined && context.characterId !== null) {
+            return context.characterId;
+        }
+
+        // 如果上下文中没有，但有角色数据，使用第一个角色
+        if (context.characters && context.characters.length > 0) {
+            console.log('向量插件: characterId 为空，使用第一个角色作为当前角色');
+            return '0'; // 返回字符串形式的索引
+        }
+
+        return null;
+    }
+
+    /**
+     * 获取存储的向量数据（仅从数据库加载）
+     */
+    async function getStoredVectors() {
+        try {
+            const dbVectors = await loadVectorsFromDatabase();
+            console.log(`向量插件: 从数据库加载了 ${dbVectors.length} 个向量`);
+            return dbVectors;
+        } catch (error) {
+            console.error('向量插件: 从数据库获取向量失败', error);
+            return [];
+        }
+    }
+
+    /**
+     * 清空向量存储
+     */
+    async function clearVectorStorage() {
+        try {
+            const currentCharId = getCurrentCharacterId();
+            if (!currentCharId) {
+                showNotification('没有选中的角色，无法清空向量存储', 'warning');
+                console.log('向量插件: 清空存储失败，characterId:', currentCharId);
+                return;
+            }
+
+            // 清空数据库中的向量数据
+            const saveDataRequest = {
+                avatar: context.characters[currentCharId].avatar,
+                data: {
+                    extensions: {
+                        vector_manager_data: null
+                    }
+                }
+            };
+
+            const response = await fetch('/api/characters/merge-attributes', {
+                method: 'POST',
+                headers: context.getRequestHeaders(),
+                body: JSON.stringify(saveDataRequest)
+            });
+
+            if (response.ok) {
+                showNotification('向量存储已清空', 'info');
+                console.log('向量插件: 数据库向量存储已清空');
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('向量插件: 清空向量存储失败', error);
+            showNotification(`清空向量存储失败: ${error.message}`, 'error');
+        }
+    }
+
+    /**
+     * 获取当前聊天ID
+     */
+    function getCurrentChatId() {
+        // 直接使用context提供的getCurrentChatId函数或chatId属性
+        if (typeof context.getCurrentChatId === 'function') {
+            return context.getCurrentChatId();
+        } else if (context.chatId) {
+            return context.chatId;
+        }
+
+        // 备用方案：手动计算
+        if (context.groupId) {
+            const group = context.groups?.find(x => x.id == context.groupId);
+            return group?.chat_id;
+        } else if (context.characterId !== undefined && context.characters[context.characterId]) {
+            return context.characters[context.characterId].chat;
+        }
+        return null;
+    }
+
+    /**
+     * 保存向量到 SillyTavern 数据库（追加模式）
+     */
+    async function saveVectorsToDatabase(newVectors) {
+        try {
+            const currentCharId = getCurrentCharacterId();
+            if (!currentCharId) {
+                console.warn('向量插件: 没有选中的角色，无法保存到数据库，characterId:', currentCharId);
+                return false;
+            }
+
+            const chatId = getCurrentChatId();
+
+            // 获取现有的向量数据
+            const existingVectors = await loadVectorsFromDatabase();
+
+            // 合并新向量和现有向量，并去重
+            const combined = [...existingVectors, ...newVectors];
+            const uniqueVectors = [];
+            const seenHashes = new Set();
+
+            for (const vector of combined) {
+                if (!seenHashes.has(vector.hash)) {
+                    seenHashes.add(vector.hash);
+                    uniqueVectors.push(vector);
+                }
+            }
+
+            const vectorData = {
+                chatId: chatId,
+                timestamp: Date.now(),
+                vectors: uniqueVectors,
+                version: '1.0'
+            };
+
+            // 使用角色合并 API
+            const saveDataRequest = {
+                avatar: context.characters[currentCharId].avatar,
+                data: {
+                    extensions: {
+                        vector_manager_data: vectorData
+                    }
+                }
+            };
+
+            const response = await fetch('/api/characters/merge-attributes', {
+                method: 'POST',
+                headers: context.getRequestHeaders(),
+                body: JSON.stringify(saveDataRequest)
+            });
+
+            if (response.ok) {
+                console.log(`向量插件: 已保存 ${uniqueVectors.length} 个向量到数据库（新增 ${newVectors.length} 个，去重后总计 ${uniqueVectors.length} 个）`);
+                return true;
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('向量插件: 保存到数据库失败', error);
+            return false;
+        }
+    }
+
+    /**
+     * 从 SillyTavern 数据库加载向量
+     */
+    async function loadVectorsFromDatabase() {
+        try {
+            const currentCharId = getCurrentCharacterId();
+            if (!currentCharId) {
+                console.warn('向量插件: 没有选中的角色，无法从数据库加载，characterId:', currentCharId);
+                return [];
+            }
+
+            const character = context.characters[currentCharId];
+            if (!character || !character.data || !character.data.extensions) {
+                return [];
+            }
+
+            const vectorData = character.data.extensions.vector_manager_data;
+            if (!vectorData || !vectorData.vectors) {
+                return [];
+            }
+
+            const chatId = getCurrentChatId();
+            console.log(`向量插件: 数据库中的chatId: "${vectorData.chatId}", 当前chatId: "${chatId}"`);
+
+            // 检查chatId匹配
+            if (vectorData.chatId === chatId) {
+                console.log(`向量插件: chatId匹配，从数据库加载了 ${vectorData.vectors.length} 个向量`);
+                return vectorData.vectors;
+            } else {
+                console.warn(`向量插件: chatId不匹配，数据库中有 ${vectorData.vectors.length} 个向量但无法使用`);
+                console.warn('向量插件: 这可能是因为聊天ID发生了变化，考虑是否需要重新向量化');
+
+                // 临时解决方案：如果当前聊天没有向量数据，可以考虑返回现有数据
+                // 但这需要谨慎处理，避免数据混乱
+                return [];
+            }
+        } catch (error) {
+            console.error('向量插件: 从数据库加载失败', error);
+            return [];
+        }
     }
 
     /**
@@ -473,8 +729,18 @@
                 id: generateHash(chunk.text + Date.now())
             }));
 
-            // 保存到本地存储
-            saveVectorsToStorage(vectorData);
+            // 保存到数据库
+            try {
+                const dbSaved = await saveVectorsToDatabase(vectorData);
+                if (dbSaved) {
+                    console.log('向量插件: 向量已保存到数据库');
+                } else {
+                    throw new Error('数据库保存失败');
+                }
+            } catch (error) {
+                console.error('向量插件: 数据库保存失败', error);
+                throw error; // 重新抛出错误，因为没有备用存储方案
+            }
 
             return { success: true, count: vectorData.length };
         } catch (error) {
@@ -774,9 +1040,19 @@
                             </div>
 
                             <div class="vector-form-group">
-                                <label class="vector-form-label" for="layer-range">聊天层数范围:</label>
-                                <input type="text" id="layer-range" class="vector-form-input" placeholder="1-10" value="1-10">
-                                <small>格式: 开始-结束，如 "1-10" 表示最近10条消息</small>
+                                <label class="vector-form-label">聊天层数范围:</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <div style="flex: 1;">
+                                        <label for="layer-start" style="font-size: 12px; color: #666;">开始楼层:</label>
+                                        <input type="number" id="layer-start" class="vector-form-input" min="1" value="1" style="margin-top: 2px;">
+                                    </div>
+                                    <span style="margin: 20px 5px 0 5px;">-</span>
+                                    <div style="flex: 1;">
+                                        <label for="layer-end" style="font-size: 12px; color: #666;">结束楼层:</label>
+                                        <input type="number" id="layer-end" class="vector-form-input" min="1" value="10" style="margin-top: 2px;">
+                                    </div>
+                                </div>
+                                <small>楼层从1开始计数，1表示第1条消息（最早），数字越大表示越新的消息。例如：1-180表示从第1条到第180条消息</small>
                             </div>
 
                             <div class="vector-form-group">
@@ -786,6 +1062,7 @@
                                     <label class="vector-form-label"><input type="checkbox" id="include-ai"> AI消息</label>
                                     <label class="vector-form-label"><input type="checkbox" id="include-hidden"> 隐藏消息</label>
                                 </div>
+                                <small>向量数据将自动保存到 SillyTavern 数据库中，与当前角色和聊天绑定</small>
                             </div>
 
                             <div class="vector-form-group">
@@ -795,6 +1072,12 @@
                                     </button>
                                     <button class="vector-btn" onclick="showPreview()">
                                         👁️ 预览内容
+                                    </button>
+                                    <button class="vector-btn" onclick="debugContextState()" style="background-color: #6c757d;">
+                                        🔍 调试上下文
+                                    </button>
+                                    <button class="vector-btn" onclick="debugDetailedIssues()" style="background-color: #dc3545;">
+                                        🐛 详细调试
                                     </button>
                                 </div>
                                 <small>预览可以查看将要向量化的内容</small>
@@ -888,6 +1171,32 @@
             endpointSelect.addEventListener('change', toggleCustomEndpointInput);
         }
 
+        // 层数范围实时保存事件
+        const layerStartInput = document.getElementById('layer-start');
+        const layerEndInput = document.getElementById('layer-end');
+
+        if (layerStartInput) {
+            layerStartInput.addEventListener('input', () => {
+                const value = parseInt(layerStartInput.value);
+                if (!isNaN(value) && value >= 1) {
+                    settings.vectorization.layerStart = value;
+                    saveSettings();
+                    console.log('向量插件: 开始楼层自动保存:', value);
+                }
+            });
+        }
+
+        if (layerEndInput) {
+            layerEndInput.addEventListener('input', () => {
+                const value = parseInt(layerEndInput.value);
+                if (!isNaN(value) && value >= 1) {
+                    settings.vectorization.layerEnd = value;
+                    saveSettings();
+                    console.log('向量插件: 结束楼层自动保存:', value);
+                }
+            });
+        }
+
         // 点击模态框外部关闭
         const modal = document.getElementById('vector-manager-modal');
         modal.addEventListener('click', (e) => {
@@ -952,7 +1261,22 @@
 
         // 向量化设置
         document.getElementById('include-chat-messages').checked = s.vectorization.includeChatMessages;
-        document.getElementById('layer-range').value = s.vectorization.layerRange;
+
+        // 兼容旧版本的 layerRange 格式
+        if (s.vectorization.layerRange && typeof s.vectorization.layerRange === 'string') {
+            try {
+                const { start, end } = parseLayerRangeOld(s.vectorization.layerRange);
+                s.vectorization.layerStart = start;
+                s.vectorization.layerEnd = end;
+            } catch (error) {
+                console.warn('解析旧版本层数范围失败，使用默认值', error);
+                s.vectorization.layerStart = 1;
+                s.vectorization.layerEnd = 10;
+            }
+        }
+
+        document.getElementById('layer-start').value = s.vectorization.layerStart || 1;
+        document.getElementById('layer-end').value = s.vectorization.layerEnd || 10;
         document.getElementById('include-user').checked = s.vectorization.messageTypes.user;
         document.getElementById('include-ai').checked = s.vectorization.messageTypes.ai;
         document.getElementById('include-hidden').checked = s.vectorization.messageTypes.hidden;
@@ -1070,16 +1394,36 @@
             // 向量化设置
             settings.vectorization.includeChatMessages = document.getElementById('include-chat-messages').checked;
 
-            // 验证层数范围格式
-            const layerRange = document.getElementById('layer-range').value;
-            try {
-                parseLayerRange(layerRange);
-                settings.vectorization.layerRange = layerRange;
-            } catch (error) {
-                settings.vectorization.layerRange = '1-10';
-                document.getElementById('layer-range').value = '1-10';
-                showNotification(`层数范围格式错误，已重置为 "1-10": ${error.message}`, 'warning');
+            // 验证层数范围
+            let layerStart = parseInt(document.getElementById('layer-start').value);
+            let layerEnd = parseInt(document.getElementById('layer-end').value);
+
+            // 验证开始楼层
+            if (isNaN(layerStart) || layerStart < 1) {
+                layerStart = 1;
+                document.getElementById('layer-start').value = layerStart;
+                showNotification('开始楼层无效，已重置为 1', 'warning');
             }
+
+            // 验证结束楼层
+            if (isNaN(layerEnd) || layerEnd < 1) {
+                layerEnd = 10;
+                document.getElementById('layer-end').value = layerEnd;
+                showNotification('结束楼层无效，已重置为 10', 'warning');
+            }
+
+            // 确保开始楼层不大于结束楼层
+            if (layerStart > layerEnd) {
+                const temp = layerStart;
+                layerStart = layerEnd;
+                layerEnd = temp;
+                document.getElementById('layer-start').value = layerStart;
+                document.getElementById('layer-end').value = layerEnd;
+                showNotification('开始楼层不能大于结束楼层，已自动调整', 'warning');
+            }
+
+            settings.vectorization.layerStart = layerStart;
+            settings.vectorization.layerEnd = layerEnd;
 
             settings.vectorization.messageTypes.user = document.getElementById('include-user').checked;
             settings.vectorization.messageTypes.ai = document.getElementById('include-ai').checked;
@@ -1105,9 +1449,9 @@
     }
 
     /**
-     * 解析层数范围
+     * 解析旧版本的层数范围格式（兼容性函数）
      */
-    function parseLayerRange(rangeString) {
+    function parseLayerRangeOld(rangeString) {
         const match = rangeString.match(/^(\d+)-(\d+)$/);
         if (!match) {
             throw new Error('层数范围格式错误，应为 "开始-结束" 格式，如 "1-10"');
@@ -1124,39 +1468,73 @@
     }
 
     /**
-     * 按层数筛选消息
+     * 获取指定范围的聊天消息
      */
-    function filterByLayer(messages, startLayer, endLayer) {
-        const totalMessages = messages.length;
-        const actualStart = Math.max(0, totalMessages - endLayer);
-        const actualEnd = Math.max(0, totalMessages - startLayer + 1);
+    function getMessagesByRange(startLayer, endLayer) {
+        if (!context.chat || context.chat.length === 0) {
+            return [];
+        }
 
-        return messages.slice(actualStart, actualEnd);
+        const totalMessages = context.chat.length;
+
+        // 层数从1开始，1表示第1条消息（最早的消息）
+        // 用户输入1-180表示要第1条到第180条消息
+        const startIndex = Math.max(0, startLayer - 1); // 转换为0基索引
+        const endIndex = Math.min(totalMessages, endLayer); // endLayer本身就是要包含的最后一条
+
+        if (startIndex >= endIndex) {
+            return [];
+        }
+
+        console.log(`向量插件: 获取消息范围 ${startLayer}-${endLayer}，总消息数: ${totalMessages}，实际索引: ${startIndex}-${endIndex}`);
+
+        return context.chat.slice(startIndex, endIndex);
     }
+
+
 
     /**
      * 开始向量化
      */
     async function startVectorization() {
         try {
+            // 调试当前上下文状态
+            debugContextState();
+
+            // 检查是否选择了角色
+            const currentCharId = getCurrentCharacterId();
+            if (!currentCharId) {
+                showNotification('请先选择一个角色，向量数据需要与角色绑定', 'warning');
+                console.log('向量插件: 角色检查失败，characterId:', currentCharId);
+                return;
+            }
+
+            console.log('向量插件: 使用角色ID:', currentCharId);
+
+            // 检查是否有聊天记录
+            if (!context.chat || context.chat.length === 0) {
+                showNotification('当前没有聊天记录可以向量化', 'warning');
+                return;
+            }
+
             if (!settings.vectorization.includeChatMessages) {
                 showNotification('请先勾选聊天消息', 'warning');
                 return;
             }
 
-            const { start, end } = parseLayerRange(settings.vectorization.layerRange);
-            const messages = getRecentMessages(end);
+            // 获取指定范围的消息
+            const messages = getMessagesByRange(settings.vectorization.layerStart, settings.vectorization.layerEnd);
 
             if (messages.length === 0) {
-                showNotification('没有找到聊天消息', 'warning');
+                showNotification(`没有找到楼层 ${settings.vectorization.layerStart}-${settings.vectorization.layerEnd} 的聊天消息`, 'warning');
                 return;
             }
 
-            // 按层数筛选
-            const layerFiltered = filterByLayer(messages, start, end);
+            console.log(`向量插件: 获取到 ${messages.length} 条消息，楼层范围: ${settings.vectorization.layerStart}-${settings.vectorization.layerEnd}`);
 
             // 按类型筛选
-            const typeFiltered = filterMessagesByType(layerFiltered, settings.vectorization.messageTypes);
+            const typeFiltered = filterMessagesByType(messages, settings.vectorization.messageTypes);
+            console.log(`向量插件: 类型筛选后剩余 ${typeFiltered.length} 条消息`);
 
             if (typeFiltered.length === 0) {
                 showNotification('根据筛选条件没有找到消息', 'warning');
@@ -1165,6 +1543,7 @@
 
             // 提取文本内容
             const textContent = extractTextContent(typeFiltered);
+            console.log(`向量插件: 提取文本内容后剩余 ${textContent.length} 条有效消息`);
 
             // 分块处理
             const allChunks = [];
@@ -1235,6 +1614,10 @@
 
             // 更新结果列表
             updateResultsList(allChunks);
+
+            // 自动保存设置，避免用户需要手动点击保存
+            saveSettings();
+            console.log('向量插件: 向量化完成后自动保存设置');
 
         } catch (error) {
             console.error('向量化失败:', error);
@@ -1323,19 +1706,18 @@
                 return;
             }
 
-            const { start, end } = parseLayerRange(settings.vectorization.layerRange);
-            const messages = getRecentMessages(end);
+            // 获取指定范围的消息
+            const messages = getMessagesByRange(settings.vectorization.layerStart, settings.vectorization.layerEnd);
 
             if (messages.length === 0) {
-                showNotification('没有找到聊天消息', 'warning');
+                showNotification(`没有找到楼层 ${settings.vectorization.layerStart}-${settings.vectorization.layerEnd} 的聊天消息`, 'warning');
                 return;
             }
 
-            // 按层数筛选
-            const layerFiltered = filterByLayer(messages, start, end);
+            console.log(`向量插件: 删除向量 - 获取到 ${messages.length} 条消息，楼层范围: ${settings.vectorization.layerStart}-${settings.vectorization.layerEnd}`);
 
             // 按类型筛选
-            const typeFiltered = filterMessagesByType(layerFiltered, settings.vectorization.messageTypes);
+            const typeFiltered = filterMessagesByType(messages, settings.vectorization.messageTypes);
 
             if (typeFiltered.length === 0) {
                 showNotification('根据筛选条件没有找到消息', 'warning');
@@ -1596,11 +1978,11 @@
                 throw new Error('无法获取查询文本的向量嵌入');
             }
 
-            // 2. 从本地存储加载向量数据
-            const storedVectors = getStoredVectors();
+            // 2. 从本地存储和数据库加载向量数据
+            const storedVectors = await getStoredVectors();
 
             if (!storedVectors || storedVectors.length === 0) {
-                console.log('向量插件: 本地没有存储的向量数据');
+                console.log('向量插件: 没有存储的向量数据');
                 return [];
             }
 
@@ -1806,6 +2188,8 @@
     window.testVectorAPI = testVectorAPI;
     window.showVectorStats = showVectorStats;
     window.clearVectorStorage = clearVectorStorage;
+    window.debugContextState = debugContextState;
+    window.debugDetailedIssues = debugDetailedIssues;
 
     // 等待SillyTavern加载完成后初始化
     if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
