@@ -1,13 +1,14 @@
 /**
  * SillyTavern 向量管理插件
  * 作者: 梅川晓钡锌
- * 版本: 1.1.0
+ * 版本: 2.0.0
  *
  * 更新内容:
- * - 移除对 SillyTavern 内置向量 API 的依赖
- * - 支持多种外部 API 端点（OpenAI、Azure、自定义）
- * - 实现本地向量存储系统
- * - 添加 API 测试和向量管理功能
+ * - 完全使用 SillyTavern 内置向量 API
+ * - 移除外部 API 依赖，使用项目内置向量系统
+ * - 支持多种向量源（transformers, openai, cohere等）
+ * - 实现基于集合的向量管理
+ * - 优化向量存储和查询性能
  */
 
 (() => {
@@ -68,6 +69,18 @@
     let context = null;
     let settings = null;
     let isModalOpen = false;
+
+    // 将函数暴露到全局作用域，供HTML调用
+    window.testVectorAPI = null;
+    window.showVectorStats = null;
+    window.clearVectorStorage = null;
+    window.closeVectorModal = null;
+    window.saveVectorSettings = null;
+    window.resetVectorSettings = null;
+    window.startVectorization = null;
+    window.showPreview = null;
+    window.debugContextState = null;
+    window.debugDetailedIssues = null;
 
     /**
      * 获取或初始化设置
@@ -134,32 +147,130 @@
     }
 
     /**
+     * 智能检测消息类型（处理异常标记情况）
+     */
+    function detectMessageType(msg) {
+        // 检查是否是特殊系统消息
+        const isSpecialSystemMessage = msg.extra?.type && [
+            'help', 'welcome', 'empty', 'generic', 'narrator',
+            'comment', 'slash_commands', 'formatting', 'hotkeys',
+            'macros', 'welcome_prompt', 'assistant_note'
+        ].includes(msg.extra.type);
+
+        if (isSpecialSystemMessage) {
+            return 'special_system';
+        }
+
+        // 标准情况判断
+        if (msg.is_user === true) {
+            return 'user';
+        }
+
+        if (msg.is_user === false && msg.is_system !== true) {
+            return 'ai';
+        }
+
+        if (msg.is_system === true && msg.is_user !== true) {
+            // 异常情况：所有消息都被标记为is_system: true
+            // 通过名称来判断消息类型
+            const name = msg.name?.toLowerCase() || '';
+
+            // 常见的用户名称模式
+            const userNamePatterns = ['云', 'user', '用户', 'human', 'me'];
+            const isUserByName = userNamePatterns.some(pattern =>
+                name === pattern.toLowerCase() || name.includes(pattern.toLowerCase())
+            );
+
+            if (isUserByName) {
+                return 'user_abnormal';
+            } else if (msg.name && msg.name.trim()) {
+                // 有名称且不是用户名称，可能是AI
+                return 'ai_abnormal';
+            }
+        }
+
+        return 'unknown';
+    }
+
+    /**
      * 按类型筛选消息
      */
     function filterMessagesByType(messages, types) {
-        return messages.filter(msg => {
-            if (types.user && msg.is_user) return true;
-            if (types.ai && !msg.is_user && !msg.is_system) return true;
-            if (types.hidden && msg.is_hidden) return true;
-            return false;
+        console.log('向量插件: 开始筛选消息，筛选条件:', types);
+        console.log('向量插件: 待筛选消息数量:', messages.length);
+
+        const filtered = messages.filter(msg => {
+            // 使用智能检测函数
+            const detectedType = detectMessageType(msg);
+
+            // 调试每条消息的属性
+            const msgInfo = {
+                name: msg.name,
+                is_user: msg.is_user,
+                is_system: msg.is_system,
+                is_hidden: msg.is_hidden,
+                extra_type: msg.extra?.type,
+                detected_type: detectedType,
+                mes: msg.mes ? msg.mes.substring(0, 50) + '...' : '(无内容)'
+            };
+
+            let shouldInclude = false;
+            let reason = '';
+
+            // 根据检测到的类型和用户选择进行筛选
+            if (types.user && (detectedType === 'user' || detectedType === 'user_abnormal')) {
+                shouldInclude = true;
+                reason = detectedType === 'user_abnormal' ? '用户消息(异常标记)' : '用户消息';
+            }
+            else if (types.ai && (detectedType === 'ai' || detectedType === 'ai_abnormal')) {
+                shouldInclude = true;
+                reason = detectedType === 'ai_abnormal' ? 'AI消息(异常标记)' : 'AI消息';
+            }
+            else if (types.hidden && msg.is_hidden === true) {
+                shouldInclude = true;
+                reason = '隐藏消息';
+            }
+
+            console.log(`向量插件: 消息筛选 - ${shouldInclude ? '✓' : '✗'} [${reason || '不匹配'}]`, msgInfo);
+
+            return shouldInclude;
         });
+
+        console.log(`向量插件: 筛选完成，筛选后消息数量: ${filtered.length}`);
+        return filtered;
     }
 
     /**
      * 提取文本内容
      */
     function extractTextContent(messages) {
-        return messages.map(msg => {
+        console.log('向量插件: 开始提取文本内容，消息数量:', messages.length);
+
+        const extracted = messages.map((msg, index) => {
             let text = msg.mes || '';
             // 移除HTML标签
             text = text.replace(/<[^>]*>/g, '');
-            return {
+
+            const result = {
                 text: text.trim(),
                 timestamp: msg.send_date,
                 isUser: msg.is_user,
                 name: msg.name || (msg.is_user ? 'User' : 'Assistant')
             };
-        }).filter(item => item.text.length > 0);
+
+            console.log(`向量插件: 提取文本 ${index + 1} - [${result.name}] ${result.isUser ? '(用户)' : '(AI)'}: ${result.text.substring(0, 100)}${result.text.length > 100 ? '...' : ''}`);
+
+            return result;
+        }).filter(item => {
+            const hasText = item.text.length > 0;
+            if (!hasText) {
+                console.log('向量插件: 过滤空文本消息:', item.name);
+            }
+            return hasText;
+        });
+
+        console.log(`向量插件: 文本提取完成，有效消息数量: ${extracted.length}`);
+        return extracted;
     }
 
     /**
@@ -233,6 +344,22 @@
     }
 
     /**
+     * 获取当前集合ID
+     */
+    function getCollectionId() {
+        const currentCharId = getCurrentCharacterId();
+        const currentChatId = getCurrentChatId();
+
+        if (currentCharId && currentChatId) {
+            return `char_${currentCharId}_chat_${currentChatId}`;
+        } else if (currentCharId) {
+            return `char_${currentCharId}`;
+        } else {
+            return 'default_collection';
+        }
+    }
+
+    /**
      * 获取API端点URL
      */
     function getApiEndpointUrl() {
@@ -271,7 +398,7 @@
     }
 
     /**
-     * 获取文本向量嵌入
+     * 获取文本向量嵌入（外部API）
      */
     async function getTextEmbedding(text, apiKey, model) {
         try {
@@ -301,28 +428,52 @@
     }
 
     /**
-     * 计算余弦相似度
+     * 批量获取文本向量嵌入（外部API）
      */
-    function cosineSimilarity(vecA, vecB) {
-        if (vecA.length !== vecB.length) {
-            throw new Error('向量维度不匹配');
+    async function batchGetEmbeddings(texts, apiKey, model, batchSize = 5) {
+        const embeddings = [];
+        const url = getApiEndpointUrl();
+        const headers = getApiHeaders(apiKey);
+
+        for (let i = 0; i < texts.length; i += batchSize) {
+            const batch = texts.slice(i, i + batchSize);
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        input: batch,
+                        model: model || 'text-embedding-ada-002'
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API 错误 ${response.status}: ${errorText}`);
+                }
+
+                const result = await response.json();
+                embeddings.push(...result.data.map(item => item.embedding));
+
+                // 显示进度
+                showNotification(`向量化进度: ${Math.min(i + batchSize, texts.length)}/${texts.length}`, 'info', 1000);
+
+                // 避免API限制，添加延迟
+                if (i + batchSize < texts.length) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            } catch (error) {
+                console.error(`批次 ${i}-${i + batchSize} 向量化失败:`, error);
+                throw error;
+            }
         }
 
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-
-        for (let i = 0; i < vecA.length; i++) {
-            dotProduct += vecA[i] * vecB[i];
-            normA += vecA[i] * vecA[i];
-            normB += vecB[i] * vecB[i];
-        }
-
-        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+        return embeddings;
     }
 
     /**
-     * 向量查询 - 使用外部API
+     * 向量查询 - 混合模式：外部API获取embedding + 内置API查询
      */
     async function queryVectors(queryText, maxResults = 10) {
         try {
@@ -334,39 +485,64 @@
                 throw new Error('请先配置向量查询API Key');
             }
 
-            // 获取查询文本的向量嵌入
+            console.log('向量插件: 开始混合模式向量查询');
+            console.log('查询文本:', queryText);
+
+            // 1. 使用外部API获取查询文本的向量嵌入
+            console.log('步骤1: 使用外部API获取查询embedding');
             const queryEmbedding = await getTextEmbedding(
                 queryText,
                 settings.vectorQuery.apiKey,
                 settings.vectorQuery.model
             );
+            console.log('查询embedding获取成功，维度:', queryEmbedding.length);
 
-            // 从本地存储的向量数据中搜索
-            const storedVectors = getStoredVectors();
-            if (storedVectors.length === 0) {
-                if (settings.vectorQuery.notifySuccess) {
-                    showNotification('没有找到已向量化的内容', 'warning');
-                }
-                return [];
+            // 2. 使用内置API进行向量查询
+            console.log('步骤2: 使用内置API进行向量查询');
+            const collectionId = getCollectionId();
+
+            // 为查询创建临时的embeddings映射
+            const queryEmbeddingsMap = {};
+            queryEmbeddingsMap[queryText] = queryEmbedding;
+
+            const response = await fetch('/api/vector/query', {
+                method: 'POST',
+                headers: context.getRequestHeaders(),
+                body: JSON.stringify({
+                    collectionId: collectionId,
+                    searchText: queryText, // 使用文本而不是embedding
+                    topK: maxResults || settings.vectorQuery.maxResults,
+                    threshold: settings.vectorQuery.scoreThreshold,
+                    source: 'webllm', // 使用webllm源
+                    embeddings: queryEmbeddingsMap // 传递查询文本的embedding
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`向量查询API错误 ${response.status}: ${errorText}`);
             }
 
-            // 计算相似度并排序
-            const similarities = storedVectors.map(item => ({
-                ...item,
-                similarity: cosineSimilarity(queryEmbedding, item.embedding)
-            }));
+            const result = await response.json();
+            const results = result.metadata || [];
 
-            // 按相似度排序并筛选
-            const results = similarities
-                .filter(item => item.similarity >= settings.vectorQuery.scoreThreshold)
-                .sort((a, b) => b.similarity - a.similarity)
-                .slice(0, maxResults);
+            console.log('向量查询完成，结果数量:', results.length);
 
             if (settings.vectorQuery.notifySuccess && results.length > 0) {
                 showNotification(`找到 ${results.length} 个相关结果`, 'success');
+            } else if (results.length === 0) {
+                if (settings.vectorQuery.notifySuccess) {
+                    showNotification('没有找到相关内容', 'warning');
+                }
             }
 
-            return results;
+            return results.map(item => ({
+                text: item.text,
+                hash: item.hash,
+                index: item.index,
+                timestamp: item.timestamp,
+                similarity: item.score || 0
+            }));
         } catch (error) {
             console.error('向量查询失败:', error);
             if (settings.vectorQuery.notifySuccess) {
@@ -459,6 +635,144 @@
     }
 
     /**
+     * 调试消息结构
+     */
+    function debugMessageStructure() {
+        console.log('=== 消息结构调试 ===');
+        if (!context.chat || context.chat.length === 0) {
+            console.log('没有聊天消息');
+            return;
+        }
+
+        const recentMessages = context.chat.slice(-10); // 获取最近10条消息
+        console.log(`分析最近 ${recentMessages.length} 条消息:`);
+
+        recentMessages.forEach((msg, index) => {
+            console.log(`消息 ${index + 1}:`, {
+                name: msg.name,
+                is_user: msg.is_user,
+                is_system: msg.is_system,
+                is_hidden: msg.is_hidden,
+                send_date: msg.send_date,
+                mes_preview: msg.mes ? msg.mes.substring(0, 100) + '...' : '(无内容)',
+                extra: msg.extra ? Object.keys(msg.extra) : '(无extra)'
+            });
+        });
+
+        // 统计消息类型
+        const stats = {
+            user: recentMessages.filter(msg => msg.is_user).length,
+            ai: recentMessages.filter(msg => !msg.is_user && !msg.is_system).length,
+            system: recentMessages.filter(msg => msg.is_system).length,
+            hidden: recentMessages.filter(msg => msg.is_hidden).length
+        };
+
+        console.log('消息类型统计:', stats);
+        console.log('==================');
+    }
+
+    /**
+     * 深度调试AI消息筛选问题
+     */
+    function debugAIMessageFiltering() {
+        console.log('=== AI消息筛选深度调试 ===');
+
+        if (!context.chat || context.chat.length === 0) {
+            console.log('❌ 没有聊天消息');
+            return;
+        }
+
+        // 1. 分析所有消息的属性
+        console.log('📊 分析所有消息属性:');
+        const allMessages = context.chat;
+        const messageAnalysis = allMessages.map((msg, index) => {
+            const detectedType = detectMessageType(msg);
+            const analysis = {
+                index: index + 1,
+                name: msg.name,
+                is_user: msg.is_user,
+                is_system: msg.is_system,
+                is_hidden: msg.is_hidden,
+                extra_type: msg.extra?.type,
+                has_content: !!(msg.mes && msg.mes.trim()),
+                content_preview: msg.mes ? msg.mes.substring(0, 50) + '...' : '(无内容)',
+                detected_type: detectedType.toUpperCase()
+            };
+            return analysis;
+        });
+
+        // 2. 统计各类型消息数量
+        const typeStats = {
+            USER: messageAnalysis.filter(m => m.detected_type === 'USER').length,
+            USER_ABNORMAL: messageAnalysis.filter(m => m.detected_type === 'USER_ABNORMAL').length,
+            AI: messageAnalysis.filter(m => m.detected_type === 'AI').length,
+            AI_ABNORMAL: messageAnalysis.filter(m => m.detected_type === 'AI_ABNORMAL').length,
+            SPECIAL_SYSTEM: messageAnalysis.filter(m => m.detected_type === 'SPECIAL_SYSTEM').length,
+            UNKNOWN: messageAnalysis.filter(m => m.detected_type === 'UNKNOWN').length
+        };
+
+        console.log('📈 消息类型统计:', typeStats);
+
+        // 3. 显示最近10条消息的详细分析
+        console.log('🔍 最近10条消息详细分析:');
+        messageAnalysis.slice(-10).forEach(msg => {
+            console.log(`消息 ${msg.index}: [${msg.detected_type}] ${msg.name} - ${msg.content_preview}`, {
+                is_user: msg.is_user,
+                is_system: msg.is_system,
+                is_hidden: msg.is_hidden,
+                extra_type: msg.extra_type
+            });
+        });
+
+        // 4. 测试AI消息筛选逻辑
+        console.log('🧪 测试AI消息筛选逻辑:');
+        const aiMessages = allMessages.filter(msg => {
+            const isAI = msg.is_user === false && msg.is_system !== true;
+            const isSpecialSystemMessage = msg.extra?.type && [
+                'help', 'welcome', 'empty', 'generic', 'narrator',
+                'comment', 'slash_commands', 'formatting', 'hotkeys',
+                'macros', 'welcome_prompt', 'assistant_note'
+            ].includes(msg.extra.type);
+
+            const shouldInclude = isAI && !isSpecialSystemMessage;
+
+            if (isAI) {
+                console.log(`AI消息检测: ${msg.name} - ${shouldInclude ? '✅ 包含' : '❌ 排除'}`, {
+                    is_user: msg.is_user,
+                    is_system: msg.is_system,
+                    extra_type: msg.extra?.type,
+                    isSpecialSystemMessage
+                });
+            }
+
+            return shouldInclude;
+        });
+
+        console.log(`🎯 AI消息筛选结果: ${aiMessages.length} 条AI消息`);
+
+        // 5. 检查UI状态
+        const userCheckbox = document.getElementById('include-user');
+        const aiCheckbox = document.getElementById('include-ai');
+        const hiddenCheckbox = document.getElementById('include-hidden');
+
+        console.log('🖥️ UI复选框状态:', {
+            user: userCheckbox ? userCheckbox.checked : '未找到',
+            ai: aiCheckbox ? aiCheckbox.checked : '未找到',
+            hidden: hiddenCheckbox ? hiddenCheckbox.checked : '未找到'
+        });
+
+        // 6. 检查设置状态
+        console.log('⚙️ 插件设置状态:', {
+            messageTypes: settings.vectorization.messageTypes,
+            layerStart: settings.vectorization.layerStart,
+            layerEnd: settings.vectorization.layerEnd,
+            includeChatMessages: settings.vectorization.includeChatMessages
+        });
+
+        console.log('=== AI消息筛选深度调试结束 ===');
+    }
+
+    /**
      * 获取当前角色ID（带容错处理）
      */
     function getCurrentCharacterId() {
@@ -477,52 +791,61 @@
     }
 
     /**
-     * 获取存储的向量数据（仅从数据库加载）
+     * 获取存储的向量数据 - 使用项目内置API
      */
     async function getStoredVectors() {
         try {
-            const dbVectors = await loadVectorsFromDatabase();
-            console.log(`向量插件: 从数据库加载了 ${dbVectors.length} 个向量`);
-            return dbVectors;
+            const collectionId = getCollectionId();
+
+            const response = await fetch('/api/vector/list', {
+                method: 'POST',
+                headers: context.getRequestHeaders(),
+                body: JSON.stringify({
+                    collectionId: collectionId,
+                    source: 'webllm', // 使用webllm源
+                    embeddings: {} // 空的embeddings映射
+                })
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    console.log('向量插件: 集合不存在，返回空数组');
+                    return [];
+                }
+                const errorText = await response.text();
+                throw new Error(`获取向量列表API错误 ${response.status}: ${errorText}`);
+            }
+
+            const hashes = await response.json();
+            console.log(`向量插件: 从API获取了 ${hashes.length} 个向量哈希`);
+            return hashes;
         } catch (error) {
-            console.error('向量插件: 从数据库获取向量失败', error);
+            console.error('向量插件: 从API获取向量失败', error);
             return [];
         }
     }
 
     /**
-     * 清空向量存储
+     * 清空向量存储 - 使用项目内置API
      */
     async function clearVectorStorage() {
         try {
-            const currentCharId = getCurrentCharacterId();
-            if (!currentCharId) {
-                showNotification('没有选中的角色，无法清空向量存储', 'warning');
-                console.log('向量插件: 清空存储失败，characterId:', currentCharId);
-                return;
-            }
+            const collectionId = getCollectionId();
 
-            // 清空数据库中的向量数据
-            const saveDataRequest = {
-                avatar: context.characters[currentCharId].avatar,
-                data: {
-                    extensions: {
-                        vector_manager_data: null
-                    }
-                }
-            };
-
-            const response = await fetch('/api/characters/merge-attributes', {
+            const response = await fetch('/api/vector/purge', {
                 method: 'POST',
                 headers: context.getRequestHeaders(),
-                body: JSON.stringify(saveDataRequest)
+                body: JSON.stringify({
+                    collectionId: collectionId
+                })
             });
 
             if (response.ok) {
                 showNotification('向量存储已清空', 'info');
-                console.log('向量插件: 数据库向量存储已清空');
+                console.log('向量插件: 向量存储已清空');
             } else {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const errorText = await response.text();
+                throw new Error(`清空向量API错误 ${response.status}: ${errorText}`);
             }
         } catch (error) {
             console.error('向量插件: 清空向量存储失败', error);
@@ -552,200 +875,127 @@
     }
 
     /**
-     * 保存向量到 SillyTavern 数据库（追加模式）
+     * 生成简单哈希
      */
-    async function saveVectorsToDatabase(newVectors) {
-        try {
-            const currentCharId = getCurrentCharacterId();
-            if (!currentCharId) {
-                console.warn('向量插件: 没有选中的角色，无法保存到数据库，characterId:', currentCharId);
-                return false;
-            }
-
-            const chatId = getCurrentChatId();
-
-            // 获取现有的向量数据
-            const existingVectors = await loadVectorsFromDatabase();
-
-            // 合并新向量和现有向量，并去重
-            const combined = [...existingVectors, ...newVectors];
-            const uniqueVectors = [];
-            const seenHashes = new Set();
-
-            for (const vector of combined) {
-                if (!seenHashes.has(vector.hash)) {
-                    seenHashes.add(vector.hash);
-                    uniqueVectors.push(vector);
-                }
-            }
-
-            const vectorData = {
-                chatId: chatId,
-                timestamp: Date.now(),
-                vectors: uniqueVectors,
-                version: '1.0'
-            };
-
-            // 使用角色合并 API
-            const saveDataRequest = {
-                avatar: context.characters[currentCharId].avatar,
-                data: {
-                    extensions: {
-                        vector_manager_data: vectorData
-                    }
-                }
-            };
-
-            const response = await fetch('/api/characters/merge-attributes', {
-                method: 'POST',
-                headers: context.getRequestHeaders(),
-                body: JSON.stringify(saveDataRequest)
-            });
-
-            if (response.ok) {
-                console.log(`向量插件: 已保存 ${uniqueVectors.length} 个向量到数据库（新增 ${newVectors.length} 个，去重后总计 ${uniqueVectors.length} 个）`);
-                return true;
-            } else {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-        } catch (error) {
-            console.error('向量插件: 保存到数据库失败', error);
-            return false;
+    function generateHash(text) {
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // 转换为32位整数
         }
+        return Math.abs(hash);
     }
 
     /**
-     * 从 SillyTavern 数据库加载向量
-     */
-    async function loadVectorsFromDatabase() {
-        try {
-            const currentCharId = getCurrentCharacterId();
-            if (!currentCharId) {
-                console.warn('向量插件: 没有选中的角色，无法从数据库加载，characterId:', currentCharId);
-                return [];
-            }
-
-            const character = context.characters[currentCharId];
-            if (!character || !character.data || !character.data.extensions) {
-                return [];
-            }
-
-            const vectorData = character.data.extensions.vector_manager_data;
-            if (!vectorData || !vectorData.vectors) {
-                return [];
-            }
-
-            const chatId = getCurrentChatId();
-            console.log(`向量插件: 数据库中的chatId: "${vectorData.chatId}", 当前chatId: "${chatId}"`);
-
-            // 检查chatId匹配
-            if (vectorData.chatId === chatId) {
-                console.log(`向量插件: chatId匹配，从数据库加载了 ${vectorData.vectors.length} 个向量`);
-                return vectorData.vectors;
-            } else {
-                console.warn(`向量插件: chatId不匹配，数据库中有 ${vectorData.vectors.length} 个向量但无法使用`);
-                console.warn('向量插件: 这可能是因为聊天ID发生了变化，考虑是否需要重新向量化');
-
-                // 临时解决方案：如果当前聊天没有向量数据，可以考虑返回现有数据
-                // 但这需要谨慎处理，避免数据混乱
-                return [];
-            }
-        } catch (error) {
-            console.error('向量插件: 从数据库加载失败', error);
-            return [];
-        }
-    }
-
-    /**
-     * 批量获取文本向量嵌入
-     */
-    async function batchGetEmbeddings(texts, apiKey, model, batchSize = 5) {
-        const embeddings = [];
-        const url = getApiEndpointUrl();
-        const headers = getApiHeaders(apiKey);
-
-        for (let i = 0; i < texts.length; i += batchSize) {
-            const batch = texts.slice(i, i + batchSize);
-
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        input: batch,
-                        model: model || 'text-embedding-ada-002'
-                    })
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`API 错误 ${response.status}: ${errorText}`);
-                }
-
-                const result = await response.json();
-                embeddings.push(...result.data.map(item => item.embedding));
-
-                // 显示进度
-                showNotification(`向量化进度: ${Math.min(i + batchSize, texts.length)}/${texts.length}`, 'info', 1000);
-
-                // 避免API限制，添加延迟
-                if (i + batchSize < texts.length) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            } catch (error) {
-                console.error(`批次 ${i}-${i + batchSize} 向量化失败:`, error);
-                throw error;
-            }
-        }
-
-        return embeddings;
-    }
-
-    /**
-     * 插入向量 - 使用外部API和本地存储
+     * 插入向量 - 混合模式：外部API获取embeddings + 内置API存储
      */
     async function insertVectors(chunks) {
         try {
+            if (!chunks || chunks.length === 0) {
+                throw new Error('没有要插入的向量数据');
+            }
+
             if (!settings.vectorQuery.apiKey) {
                 throw new Error('请先配置向量查询API Key');
             }
 
-            // 提取文本内容
-            const texts = chunks.map(chunk => chunk.text);
+            console.log('向量插件: 开始混合模式向量插入');
+            console.log('待处理文本块数量:', chunks.length);
 
-            // 批量获取向量嵌入
+            // 1. 使用外部API批量获取向量嵌入
+            console.log('步骤1: 使用外部API批量获取embeddings');
+            const texts = chunks.map(chunk => chunk.text);
             const embeddings = await batchGetEmbeddings(
                 texts,
                 settings.vectorQuery.apiKey,
                 settings.vectorQuery.model,
                 settings.vectorQuery.batchSize
             );
+            console.log('embeddings获取成功，数量:', embeddings.length);
 
-            // 创建向量数据对象
-            const vectorData = chunks.map((chunk, index) => ({
-                ...chunk,
-                embedding: embeddings[index],
-                timestamp: Date.now(),
-                id: generateHash(chunk.text + Date.now())
+            // 2. 准备向量数据项（包含embedding）
+            const items = chunks.map((chunk, index) => ({
+                hash: generateHash(chunk.text + Date.now() + index),
+                text: chunk.text,
+                embedding: embeddings[index], // 包含外部API获取的embedding
+                index: chunk.index || index,
+                timestamp: chunk.timestamp || Date.now(),
+                ...chunk.metadata
             }));
 
-            // 保存到数据库
-            try {
-                const dbSaved = await saveVectorsToDatabase(vectorData);
-                if (dbSaved) {
-                    console.log('向量插件: 向量已保存到数据库');
-                } else {
-                    throw new Error('数据库保存失败');
-                }
-            } catch (error) {
-                console.error('向量插件: 数据库保存失败', error);
-                throw error; // 重新抛出错误，因为没有备用存储方案
+            // 3. 使用内置API存储向量
+            console.log('步骤2: 使用内置API存储向量');
+            const collectionId = getCollectionId();
+
+            // 准备embeddings映射，用于webllm源
+            const embeddingsMap = {};
+            items.forEach(item => {
+                embeddingsMap[item.text] = item.embedding;
+            });
+
+            const response = await fetch('/api/vector/insert', {
+                method: 'POST',
+                headers: context.getRequestHeaders(),
+                body: JSON.stringify({
+                    collectionId: collectionId,
+                    items: items.map(item => ({
+                        hash: item.hash,
+                        text: item.text,
+                        index: item.index
+                    })),
+                    source: 'webllm', // 使用webllm源，支持预计算的embeddings
+                    embeddings: embeddingsMap // 直接传递embeddings映射
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`向量插入API错误 ${response.status}: ${errorText}`);
             }
 
-            return { success: true, count: vectorData.length };
+            console.log(`向量插件: 成功插入 ${items.length} 个向量到集合 ${collectionId}`);
+            showNotification(`成功向量化 ${items.length} 个文本块`, 'success');
+            return { success: true, count: items.length };
         } catch (error) {
             console.error('向量插入失败:', error);
             showNotification(`向量插入失败: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    /**
+     * 删除向量 - 使用项目内置API
+     */
+    async function deleteVectors(hashes) {
+        try {
+            if (!hashes || hashes.length === 0) {
+                throw new Error('没有要删除的向量哈希');
+            }
+
+            const collectionId = getCollectionId();
+
+            const response = await fetch('/api/vector/delete', {
+                method: 'POST',
+                headers: context.getRequestHeaders(),
+                body: JSON.stringify({
+                    collectionId: collectionId,
+                    hashes: hashes,
+                    source: 'webllm', // 使用webllm源
+                    embeddings: {} // 空的embeddings映射
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`删除向量API错误 ${response.status}: ${errorText}`);
+            }
+
+            console.log(`向量插件: 成功删除 ${hashes.length} 个向量`);
+            return { success: true, count: hashes.length };
+        } catch (error) {
+            console.error('删除向量失败:', error);
+            showNotification(`删除向量失败: ${error.message}`, 'error');
             throw error;
         }
     }
@@ -760,9 +1010,12 @@
                 return;
             }
 
-            showNotification('正在测试API连接...', 'info');
+            showNotification('正在测试混合向量API...', 'info');
 
             const testText = "这是一个测试文本";
+
+            // 1. 测试外部API连接
+            console.log('测试步骤1: 外部API连接测试');
             const embedding = await getTextEmbedding(
                 testText,
                 settings.vectorQuery.apiKey,
@@ -770,44 +1023,77 @@
             );
 
             if (embedding && embedding.length > 0) {
-                showNotification(`API连接成功！向量维度: ${embedding.length}`, 'success');
+                console.log(`外部API连接成功！向量维度: ${embedding.length}`);
+
+                // 2. 测试完整的插入和查询流程
+                console.log('测试步骤2: 完整流程测试');
+                const testChunks = [{
+                    text: testText,
+                    index: 0,
+                    timestamp: Date.now()
+                }];
+
+                // 测试插入向量
+                const insertResult = await insertVectors(testChunks);
+
+                if (insertResult.success) {
+                    // 测试查询向量
+                    const queryResults = await queryVectors(testText, 1);
+
+                    if (queryResults.length > 0) {
+                        showNotification(`混合向量API测试成功！外部API: ${settings.vectorQuery.apiEndpoint}, 向量维度: ${embedding.length}`, 'success');
+
+                        // 清理测试数据
+                        try {
+                            await deleteVectors([queryResults[0].hash]);
+                            console.log('向量插件: 测试数据已清理');
+                        } catch (cleanupError) {
+                            console.warn('向量插件: 清理测试数据失败', cleanupError);
+                        }
+                    } else {
+                        showNotification('向量查询测试失败：未找到插入的测试数据', 'error');
+                    }
+                } else {
+                    showNotification('向量插入测试失败', 'error');
+                }
             } else {
-                showNotification('API连接失败：返回的向量为空', 'error');
+                showNotification('外部API连接失败：返回的向量为空', 'error');
             }
         } catch (error) {
-            console.error('API测试失败:', error);
-            showNotification(`API连接失败: ${error.message}`, 'error');
+            console.error('向量API测试失败:', error);
+            showNotification(`向量API测试失败: ${error.message}`, 'error');
         }
     }
 
     /**
      * 显示向量统计信息
      */
-    function showVectorStats() {
-        const vectors = getStoredVectors();
-        const totalVectors = vectors.length;
+    async function showVectorStats() {
+        try {
+            const vectors = await getStoredVectors();
+            const totalVectors = vectors.length;
 
-        if (totalVectors === 0) {
-            showNotification('暂无向量数据', 'info');
-            return;
-        }
+            if (totalVectors === 0) {
+                showNotification('暂无向量数据', 'info');
+                return;
+            }
 
-        const totalSize = JSON.stringify(vectors).length;
-        const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
+            const collectionId = getCollectionId();
 
-        const oldestTimestamp = Math.min(...vectors.map(v => v.timestamp));
-        const newestTimestamp = Math.max(...vectors.map(v => v.timestamp));
-
-        const statsText = `
+            const statsText = `
 向量统计信息:
+- 集合ID: ${collectionId}
+- 向量源: 混合模式 (外部API + 内置存储)
 - 总向量数: ${totalVectors}
-- 存储大小: ${sizeInMB} MB
-- 最早创建: ${new Date(oldestTimestamp).toLocaleString()}
-- 最近创建: ${new Date(newestTimestamp).toLocaleString()}
-        `.trim();
+- 向量哈希示例: ${vectors.slice(0, 3).join(', ')}${vectors.length > 3 ? '...' : ''}
+            `.trim();
 
-        // 显示统计信息模态框
-        showPreviewModal(statsText);
+            // 显示统计信息模态框
+            showPreviewModal(statsText);
+        } catch (error) {
+            console.error('获取向量统计失败:', error);
+            showNotification(`获取向量统计失败: ${error.message}`, 'error');
+        }
     }
 
     /**
@@ -885,7 +1171,7 @@
                                 <label class="vector-form-label">
                                     <input type="checkbox" id="query-enabled"> 启用向量查询
                                 </label>
-                                <small>开启后将使用外部API进行向量查询</small>
+                                <small>混合模式：外部API获取embeddings + 内置向量数据库存储</small>
                             </div>
 
                             <div class="vector-form-group">
@@ -895,7 +1181,7 @@
                                     <option value="azure">Azure OpenAI</option>
                                     <option value="custom">自定义端点</option>
                                 </select>
-                                <small>选择向量化服务提供商</small>
+                                <small>选择外部向量化服务提供商</small>
                             </div>
 
                             <div class="vector-form-group" id="custom-endpoint-group" style="display: none;">
@@ -956,7 +1242,7 @@
                             <div class="vector-form-group">
                                 <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
                                     <button class="vector-btn" onclick="testVectorAPI()">
-                                        🔗 测试API连接
+                                        🔗 测试混合API
                                     </button>
                                     <button class="vector-btn" onclick="showVectorStats()">
                                         📊 查看向量统计
@@ -966,7 +1252,7 @@
                                         🗑️ 清空存储
                                     </button>
                                 </div>
-                                <small>建议先测试API连接确保配置正确</small>
+                                <small>混合模式：外部API获取高质量embeddings + 内置向量数据库管理</small>
                             </div>
                         </div>
 
@@ -1075,6 +1361,12 @@
                                     </button>
                                     <button class="vector-btn" onclick="debugContextState()" style="background-color: #6c757d;">
                                         🔍 调试上下文
+                                    </button>
+                                    <button class="vector-btn" onclick="debugMessageStructure()" style="background-color: #17a2b8;">
+                                        📋 消息结构
+                                    </button>
+                                    <button class="vector-btn" onclick="debugAIMessageFiltering()" style="background-color: #28a745;">
+                                        🤖 AI消息调试
                                     </button>
                                     <button class="vector-btn" onclick="debugDetailedIssues()" style="background-color: #dc3545;">
                                         🐛 详细调试
@@ -1701,6 +1993,34 @@
      */
     function showPreview() {
         try {
+            console.log('=== 向量插件预览调试开始 ===');
+
+            // 1. 检查基本设置
+            console.log('当前设置:', settings);
+            console.log('includeChatMessages:', settings.vectorization.includeChatMessages);
+            console.log('messageTypes:', settings.vectorization.messageTypes);
+
+            // 2. 检查UI状态
+            const userChecked = document.getElementById('include-user')?.checked;
+            const aiChecked = document.getElementById('include-ai')?.checked;
+            const hiddenChecked = document.getElementById('include-hidden')?.checked;
+            console.log('UI复选框状态:', { userChecked, aiChecked, hiddenChecked });
+
+            // 3. 强制从UI读取当前状态
+            const currentTypes = {
+                user: userChecked === true,
+                ai: aiChecked === true,
+                hidden: hiddenChecked === true
+            };
+            console.log('当前筛选类型:', currentTypes);
+
+            // 4. 如果没有选择任何类型，给出警告
+            if (!currentTypes.user && !currentTypes.ai && !currentTypes.hidden) {
+                showNotification('请至少选择一种消息类型', 'warning');
+                console.log('=== 预览调试结束：未选择消息类型 ===');
+                return;
+            }
+
             if (!settings.vectorization.includeChatMessages) {
                 showNotification('请先勾选聊天消息', 'warning');
                 return;
@@ -1714,13 +2034,14 @@
                 return;
             }
 
-            console.log(`向量插件: 删除向量 - 获取到 ${messages.length} 条消息，楼层范围: ${settings.vectorization.layerStart}-${settings.vectorization.layerEnd}`);
+            console.log(`向量插件: 获取到 ${messages.length} 条消息，楼层范围: ${settings.vectorization.layerStart}-${settings.vectorization.layerEnd}`);
 
-            // 按类型筛选
-            const typeFiltered = filterMessagesByType(messages, settings.vectorization.messageTypes);
+            // 使用当前UI状态进行筛选，而不是保存的设置
+            const typeFiltered = filterMessagesByType(messages, currentTypes);
 
             if (typeFiltered.length === 0) {
                 showNotification('根据筛选条件没有找到消息', 'warning');
+                console.log('=== 预览调试结束：无匹配消息 ===');
                 return;
             }
 
@@ -1735,6 +2056,8 @@
 
             // 显示预览模态框
             showPreviewModal(previewText);
+
+            console.log('=== 向量插件预览调试结束 ===');
 
         } catch (error) {
             console.error('预览失败:', error);
@@ -1957,84 +2280,9 @@
         }
     }
 
-    /**
-     * 执行向量查询
-     */
-    async function queryVectors(queryText) {
-        try {
-            if (!settings.vectorQuery.apiKey) {
-                throw new Error('请先配置向量查询API Key');
-            }
 
-            // 1. 获取查询文本的向量嵌入
-            const queryEmbedding = await batchGetEmbeddings(
-                [queryText],
-                settings.vectorQuery.apiKey,
-                settings.vectorQuery.model,
-                1
-            );
 
-            if (!queryEmbedding || queryEmbedding.length === 0) {
-                throw new Error('无法获取查询文本的向量嵌入');
-            }
 
-            // 2. 从本地存储和数据库加载向量数据
-            const storedVectors = await getStoredVectors();
-
-            if (!storedVectors || storedVectors.length === 0) {
-                console.log('向量插件: 没有存储的向量数据');
-                return [];
-            }
-
-            // 3. 计算相似度并排序
-            const results = storedVectors.map(vectorData => {
-                const similarity = calculateCosineSimilarity(queryEmbedding[0], vectorData.embedding);
-                return {
-                    text: vectorData.text,
-                    score: similarity,
-                    source: vectorData.source,
-                    timestamp: vectorData.timestamp,
-                    name: vectorData.name,
-                    isUser: vectorData.isUser
-                };
-            });
-
-            // 4. 按相似度排序（降序）
-            results.sort((a, b) => b.score - a.score);
-
-            console.log(`向量插件: 查询完成，找到 ${results.length} 个结果`);
-            return results;
-
-        } catch (error) {
-            console.error('向量查询失败:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 计算余弦相似度
-     */
-    function calculateCosineSimilarity(vecA, vecB) {
-        if (!vecA || !vecB || vecA.length !== vecB.length) {
-            return 0;
-        }
-
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-
-        for (let i = 0; i < vecA.length; i++) {
-            dotProduct += vecA[i] * vecB[i];
-            normA += vecA[i] * vecA[i];
-            normB += vecB[i] * vecB[i];
-        }
-
-        if (normA === 0 || normB === 0) {
-            return 0;
-        }
-
-        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-    }
 
     /**
      * 将向量查询结果注入到聊天上下文
@@ -2180,8 +2428,20 @@
 
     // 全局函数，供HTML调用
     window.closeVectorModal = closeModal;
-    window.saveVectorSettings = saveSettingsFromForm;
-    window.resetVectorSettings = resetSettings;
+    window.saveVectorSettings = () => {
+        saveSettingsFromForm();
+        saveSettings();
+        showNotification('设置已保存', 'success');
+    };
+    window.resetVectorSettings = () => {
+        if (confirm('确定要重置所有设置吗？')) {
+            context.extensionSettings[MODULE_NAME] = structuredClone(defaultSettings);
+            settings = getSettings();
+            loadSettingsToForm();
+            saveSettings();
+            showNotification('设置已重置', 'info');
+        }
+    };
     window.startVectorization = startVectorization;
     window.showPreview = showPreview;
     window.closePreviewModal = closePreviewModal;
@@ -2190,6 +2450,8 @@
     window.clearVectorStorage = clearVectorStorage;
     window.debugContextState = debugContextState;
     window.debugDetailedIssues = debugDetailedIssues;
+    window.debugMessageStructure = debugMessageStructure;
+    window.debugAIMessageFiltering = debugAIMessageFiltering;
 
     // 等待SillyTavern加载完成后初始化
     if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {

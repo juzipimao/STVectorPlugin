@@ -7,8 +7,8 @@
     "js": "index.js",
     "css": "style.css",
     "author": "梅川晓钡锌",
-    "version": "1.0.2",
+    "version": "2.1.0",
     "homePage": "https://github.com/juzipimao/STVectorPlugin",
     "auto_update": true,
-    "description": "为 SillyTavern 提供强大的向量查询、Rerank 和内容管理功能"
+    "description": "混合模式向量插件：外部API获取高质量embeddings + SillyTavern内置向量数据库管理"
 }
