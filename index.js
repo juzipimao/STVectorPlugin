@@ -69,6 +69,8 @@
     let context = null;
     let settings = null;
     let isModalOpen = false;
+    let currentVectorCount = 0; // 当前向量数量
+    let vectorCountUpdateInterval = null; // 向量数量更新定时器
 
     // 将函数暴露到全局作用域，供HTML调用
     window.testVectorAPI = null;
@@ -350,13 +352,21 @@
         const currentCharId = getCurrentCharacterId();
         const currentChatId = getCurrentChatId();
 
-        if (currentCharId && currentChatId) {
-            return `char_${currentCharId}_chat_${currentChatId}`;
-        } else if (currentCharId) {
-            return `char_${currentCharId}`;
+        console.log('🔍 集合ID生成调试:');
+        console.log('   角色ID:', currentCharId);
+        console.log('   聊天ID:', currentChatId);
+
+        let collectionId;
+        if (currentCharId !== null && currentCharId !== undefined && currentChatId) {
+            collectionId = `char_${currentCharId}_chat_${currentChatId}`;
+        } else if (currentCharId !== null && currentCharId !== undefined) {
+            collectionId = `char_${currentCharId}`;
         } else {
-            return 'default_collection';
+            collectionId = 'default_collection';
         }
+
+        console.log('   生成的集合ID:', collectionId);
+        return collectionId;
     }
 
     /**
@@ -475,7 +485,11 @@
     /**
      * 向量查询 - 混合模式：外部API获取embedding + 内置API查询
      */
-    async function queryVectors(queryText, maxResults = 10) {
+    async function queryVectors(queryText, maxResults = null) {
+        // 如果没有指定maxResults，使用设置中的值
+        if (maxResults === null) {
+            maxResults = settings.vectorQuery.maxResults || 10;
+        }
         try {
             if (!settings.vectorQuery.enabled) {
                 return [];
@@ -485,26 +499,44 @@
                 throw new Error('请先配置向量查询API Key');
             }
 
-            console.log('向量插件: 开始混合模式向量查询');
-            console.log('查询文本:', queryText);
+            console.log('🔍 开始混合模式向量查询');
+            console.log('📝 查询文本长度:', queryText.length, '字符');
+            console.log(`🔧 查询配置信息:`);
+            console.log(`   模型: ${settings.vectorQuery.model}`);
+            console.log(`   API密钥: ${settings.vectorQuery.apiKey ? '已设置' : '未设置'}`);
+            console.log(`   相似度阈值: ${settings.vectorQuery.scoreThreshold}`);
+            console.log(`   最大结果数: ${maxResults}`);
 
             // 1. 使用外部API获取查询文本的向量嵌入
-            console.log('步骤1: 使用外部API获取查询embedding');
+            console.log('🌐 步骤1: 使用外部API获取查询embedding');
+            const startTime = Date.now();
             const queryEmbedding = await getTextEmbedding(
                 queryText,
                 settings.vectorQuery.apiKey,
                 settings.vectorQuery.model
             );
-            console.log('查询embedding获取成功，维度:', queryEmbedding.length);
+            const embeddingTime = Date.now() - startTime;
+            console.log(`✅ 查询embedding获取成功: 维度${queryEmbedding.length}, 耗时${embeddingTime}ms`);
+
+            // 调试：显示向量的一些统计信息
+            const embeddingStats = {
+                min: Math.min(...queryEmbedding),
+                max: Math.max(...queryEmbedding),
+                avg: queryEmbedding.reduce((a, b) => a + b, 0) / queryEmbedding.length,
+                norm: Math.sqrt(queryEmbedding.reduce((a, b) => a + b * b, 0))
+            };
+            console.log(`🔍 查询向量统计: 最小值${embeddingStats.min.toFixed(6)}, 最大值${embeddingStats.max.toFixed(6)}, 平均值${embeddingStats.avg.toFixed(6)}, 模长${embeddingStats.norm.toFixed(6)}`);
 
             // 2. 使用内置API进行向量查询
-            console.log('步骤2: 使用内置API进行向量查询');
+            console.log('🗄️ 步骤2: 使用内置API进行向量查询');
             const collectionId = getCollectionId();
+            console.log('📂 集合ID:', collectionId);
 
             // 为查询创建临时的embeddings映射
             const queryEmbeddingsMap = {};
             queryEmbeddingsMap[queryText] = queryEmbedding;
 
+            const queryStartTime = Date.now();
             const response = await fetch('/api/vector/query', {
                 method: 'POST',
                 headers: context.getRequestHeaders(),
@@ -524,25 +556,110 @@
             }
 
             const result = await response.json();
-            const results = result.metadata || [];
+            const queryTime = Date.now() - queryStartTime;
 
-            console.log('向量查询完成，结果数量:', results.length);
+            console.log(`✅ 向量查询API调用完成, 耗时${queryTime}ms`);
+            console.log(`🔍 API返回的完整数据结构:`, result);
+            console.log(`🔍 result的所有属性:`, Object.keys(result));
 
-            if (settings.vectorQuery.notifySuccess && results.length > 0) {
-                showNotification(`找到 ${results.length} 个相关结果`, 'success');
-            } else if (results.length === 0) {
-                if (settings.vectorQuery.notifySuccess) {
-                    showNotification('没有找到相关内容', 'warning');
+            // 尝试从不同可能的字段获取结果
+            const results = result.metadata || result.results || result.data || [];
+            console.log(`📊 提取到${results.length}条结果`);
+
+            if (results.length > 0) {
+                // 调试：检查第一个结果的完整数据结构
+                const firstResult = results[0];
+                console.log(`🔍 第一个结果的完整数据:`, firstResult);
+                console.log(`🔍 第一个结果的所有属性:`, Object.keys(firstResult));
+
+                // 尝试从不同可能的字段获取分数
+                const possibleScoreFields = ['score', 'similarity', 'distance', 'cosine_similarity', 'relevance', 'confidence'];
+                console.log(`🔍 分数字段检查:`);
+                possibleScoreFields.forEach(field => {
+                    if (firstResult.hasOwnProperty(field)) {
+                        console.log(`   ✅ ${field}: ${firstResult[field]}`);
+                    } else {
+                        console.log(`   ❌ ${field}: 不存在`);
+                    }
+                });
+
+                // 提取分数，尝试多个可能的字段
+                const scores = results.map(r => {
+                    // 尝试多种可能的分数字段
+                    let score = r.score ?? r.similarity ?? r.cosine_similarity ?? r.relevance ?? r.confidence;
+
+                    // 如果是距离，转换为相似度 (1 - distance)
+                    if (score === undefined && r.distance !== undefined) {
+                        score = Math.max(0, 1 - r.distance);
+                    }
+
+                    // 如果还是没有分数，返回0
+                    return score ?? 0;
+                }).sort((a, b) => b - a);
+
+                console.log(`📊 查询结果分析: 最高分${scores[0]?.toFixed(3)}, 最低分${scores[scores.length-1]?.toFixed(3)}, 平均分${(scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(3)}`);
+
+                // 详细的结果信息
+                console.log(`🔍 第一个结果详细信息:`);
+                console.log(`   - 文本长度: ${firstResult.text?.length || 0} 字符`);
+                console.log(`   - 原始分数字段: ${firstResult.score}`);
+                console.log(`   - 处理后分数: ${scores[0]}`);
+                console.log(`   - 哈希: ${firstResult.hash}`);
+                console.log(`   - 索引: ${firstResult.index}`);
+                console.log(`   - 时间戳: ${firstResult.timestamp}`);
+
+                // 如果所有分数都是0，可能是维度不匹配问题
+                if (scores.every(score => score === 0)) {
+                    console.warn(`⚠️ 警告: 所有相似度分数都为0！`);
+                    console.warn(`🔍 问题分析:`);
+                    console.warn(`   当前查询向量维度: ${queryEmbedding.length}`);
+                    console.warn(`   当前使用模型: ${settings.vectorQuery.model}`);
+                    console.warn(`   这通常表示存储的向量与查询向量维度不匹配`);
+                    console.warn(`💡 解决方案:`);
+                    console.warn(`   1. 如果最近更改了embedding模型，需要重新向量化所有内容`);
+                    console.warn(`   2. 确保向量化和查询使用相同的模型配置`);
+                    console.warn(`   3. 可以先清空向量存储，然后重新向量化`);
+                    console.warn(`🔧 操作建议:`);
+                    console.warn(`   - 打开向量管理插件 → 向量化标签页 → 清空存储`);
+                    console.warn(`   - 然后使用当前模型(${settings.vectorQuery.model})重新向量化`);
+
+                    // 显示通知给用户
+                    if (settings.vectorQuery.notifySuccess) {
+                        showNotification(`向量维度不匹配！当前模型${settings.vectorQuery.model}(${queryEmbedding.length}维)，建议重新向量化`, 'warning');
+                    }
                 }
             }
 
-            return results.map(item => ({
-                text: item.text,
-                hash: item.hash,
-                index: item.index,
-                timestamp: item.timestamp,
-                similarity: item.score || 0
-            }));
+            // 处理查询结果，使用正确的分数字段
+            const processedResults = results.map(item => {
+                // 尝试获取分数，支持多种可能的字段名
+                let score = item.score ?? item.similarity ?? item.cosine_similarity ?? item.relevance ?? item.confidence;
+
+                // 如果是距离，转换为相似度
+                if (score === undefined && item.distance !== undefined) {
+                    score = Math.max(0, 1 - item.distance);
+                }
+
+                // 默认分数为0
+                score = score ?? 0;
+
+                return {
+                    text: item.text,
+                    hash: item.hash,
+                    index: item.index,
+                    timestamp: item.timestamp,
+                    similarity: score,
+                    score: score // 保持兼容性
+                };
+            });
+
+            console.log(`🔄 结果处理完成: ${results.length} -> ${processedResults.length} 条`);
+
+            if (processedResults.length > 0) {
+                console.log(`📝 结果示例: "${processedResults[0].text.substring(0, 50)}..." (分数: ${processedResults[0].score.toFixed(3)})`);
+            }
+
+            return processedResults;
         } catch (error) {
             console.error('向量查询失败:', error);
             if (settings.vectorQuery.notifySuccess) {
@@ -776,18 +893,90 @@
      * 获取当前角色ID（带容错处理）
      */
     function getCurrentCharacterId() {
-        // 首先尝试从上下文获取
+        // 调试信息
+        console.log('🔍 获取角色ID调试信息:');
+        console.log('   全局this_chid:', typeof this_chid !== 'undefined' ? this_chid : 'undefined');
+        console.log('   全局characters长度:', typeof characters !== 'undefined' ? characters?.length : 'undefined');
+        console.log('   context.characters长度:', context.characters?.length || 0);
+
+        // SillyTavern标准方式：使用全局this_chid变量
+        if (typeof this_chid !== 'undefined' && this_chid !== null && this_chid !== undefined) {
+            // 验证this_chid是否有效
+            if (typeof characters !== 'undefined' && characters && characters[this_chid]) {
+                console.log('   ✅ 使用全局this_chid:', this_chid);
+                console.log('   ✅ 角色名称:', characters[this_chid].name);
+                return this_chid;
+            } else {
+                console.warn('   ⚠️ this_chid存在但角色数据无效:', this_chid);
+            }
+        }
+
+        // 备用方案1：从上下文获取（如果存在）
         if (context.characterId !== undefined && context.characterId !== null) {
+            console.log('   ✅ 使用context.characterId:', context.characterId);
             return context.characterId;
         }
 
-        // 如果上下文中没有，但有角色数据，使用第一个角色
-        if (context.characters && context.characters.length > 0) {
-            console.log('向量插件: characterId 为空，使用第一个角色作为当前角色');
-            return '0'; // 返回字符串形式的索引
+        // 备用方案2：从聊天记录中获取
+        if (context.chat && context.chat.length > 0) {
+            const lastMessage = context.chat[context.chat.length - 1];
+            if (lastMessage && lastMessage.character_id !== undefined) {
+                console.log('   ✅ 从聊天记录获取角色ID:', lastMessage.character_id);
+                return lastMessage.character_id;
+            }
         }
 
+        // 备用方案3：如果有角色数据但没有选中角色，使用第一个
+        if ((typeof characters !== 'undefined' && characters && characters.length > 0) ||
+            (context.characters && context.characters.length > 0)) {
+            console.warn('   ⚠️ 没有选中角色，使用第一个角色 (ID: 0)');
+            return 0;
+        }
+
+        console.error('   ❌ 无法获取角色ID - 没有可用的角色数据');
         return null;
+    }
+
+    /**
+     * 调试向量存储状态
+     */
+    async function debugVectorStorage() {
+        console.log('=== 向量存储调试 ===');
+
+        // 尝试不同的集合ID
+        const possibleCollectionIds = [
+            getCollectionId(),
+            'char_0_chat_test - 2025-7-17 @01h 04m 49s 311ms imported',
+            'default_collection'
+        ];
+
+        for (const collectionId of possibleCollectionIds) {
+            try {
+                console.log(`🔍 检查集合: ${collectionId}`);
+                const response = await fetch('/api/vector/list', {
+                    method: 'POST',
+                    headers: context.getRequestHeaders(),
+                    body: JSON.stringify({
+                        collectionId: collectionId,
+                        source: 'webllm',
+                        embeddings: {}
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const hashes = data.hashes || [];
+                    console.log(`   ✅ 集合存在，向量数量: ${hashes.length}`);
+                    if (hashes.length > 0) {
+                        console.log(`   📝 前3个哈希: ${hashes.slice(0, 3).join(', ')}`);
+                    }
+                } else {
+                    console.log(`   ❌ 集合不存在或无法访问 (${response.status})`);
+                }
+            } catch (error) {
+                console.log(`   ❌ 检查集合时出错: ${error.message}`);
+            }
+        }
     }
 
     /**
@@ -843,6 +1032,9 @@
             if (response.ok) {
                 showNotification('向量存储已清空', 'info');
                 console.log('向量插件: 向量存储已清空');
+
+                // 更新向量数量显示
+                setTimeout(updateVectorCountDisplay, 500);
             } else {
                 const errorText = await response.text();
                 throw new Error(`清空向量API错误 ${response.status}: ${errorText}`);
@@ -902,6 +1094,10 @@
 
             console.log('向量插件: 开始混合模式向量插入');
             console.log('待处理文本块数量:', chunks.length);
+            console.log(`🔧 向量化配置信息:`);
+            console.log(`   模型: ${settings.vectorQuery.model}`);
+            console.log(`   API密钥: ${settings.vectorQuery.apiKey ? '已设置' : '未设置'}`);
+            console.log(`   批处理大小: ${settings.vectorQuery.batchSize}`);
 
             // 1. 使用外部API批量获取向量嵌入
             console.log('步骤1: 使用外部API批量获取embeddings');
@@ -1066,6 +1262,100 @@
     }
 
     /**
+     * 获取当前角色会话的向量数量
+     */
+    async function getCurrentVectorCount() {
+        try {
+            const vectors = await getStoredVectors();
+            return vectors.length;
+        } catch (error) {
+            console.error('向量插件: 获取向量数量失败', error);
+            return 0;
+        }
+    }
+
+    /**
+     * 更新向量数量显示
+     */
+    async function updateVectorCountDisplay() {
+        try {
+            const count = await getCurrentVectorCount();
+            currentVectorCount = count;
+
+            // 更新UI显示
+            const countElement = document.getElementById('current-vector-count');
+            const characterElement = document.getElementById('current-character-name');
+            const chatElement = document.getElementById('current-chat-id');
+
+            if (countElement) {
+                countElement.textContent = count;
+                countElement.className = count > 0 ? 'vector-count-number active' : 'vector-count-number';
+            }
+
+            if (characterElement) {
+                const currentCharacter = getCurrentCharacterName();
+                characterElement.textContent = currentCharacter || '未选择角色';
+            }
+
+            if (chatElement) {
+                const chatId = getCollectionId();
+                chatElement.textContent = chatId || '无聊天会话';
+            }
+
+            console.log(`向量插件: 当前向量数量已更新为 ${count}`);
+        } catch (error) {
+            console.error('向量插件: 更新向量数量显示失败', error);
+        }
+    }
+
+    /**
+     * 获取当前角色名称
+     */
+    function getCurrentCharacterName() {
+        try {
+            const characterId = getCurrentCharacterId();
+
+            // 优先从全局characters数组获取
+            if (characterId !== null && characterId !== undefined &&
+                typeof characters !== 'undefined' && characters && characters[characterId]) {
+                return characters[characterId].name || '未知角色';
+            }
+
+            // 备用方案：从context获取
+            if (characterId !== null && characterId !== undefined &&
+                context.characters && context.characters[characterId]) {
+                return context.characters[characterId].name || '未知角色';
+            }
+
+            return null;
+        } catch (error) {
+            console.error('向量插件: 获取角色名称失败', error);
+            return null;
+        }
+    }
+
+    /**
+     * 获取稳定的集合ID（基于角色名称）
+     */
+    function getStableCollectionId() {
+        const characterName = getCurrentCharacterName();
+        const currentChatId = getCurrentChatId();
+
+        if (characterName && currentChatId) {
+            // 清理特殊字符，创建稳定的ID
+            const cleanCharName = characterName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
+            const cleanChatId = String(currentChatId).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
+            return `char_${cleanCharName}_chat_${cleanChatId}`;
+        } else if (characterName) {
+            const cleanCharName = characterName.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
+            return `char_${cleanCharName}`;
+        } else {
+            // 回退到基于ID的方案
+            return getCollectionId();
+        }
+    }
+
+    /**
      * 显示向量统计信息
      */
     async function showVectorStats() {
@@ -1155,6 +1445,29 @@
                     <div class="vector-modal-header">
                         <div class="vector-modal-title">向量管理插件</div>
                         <button class="vector-modal-close" onclick="closeVectorModal()">&times;</button>
+                    </div>
+
+                    <!-- 向量数量显示区域 -->
+                    <div class="vector-stats-panel">
+                        <div class="vector-stats-row">
+                            <div class="vector-stats-item">
+                                <span class="vector-stats-label">当前角色:</span>
+                                <span id="current-character-name" class="vector-stats-value">加载中...</span>
+                            </div>
+                            <div class="vector-stats-item">
+                                <span class="vector-stats-label">聊天会话:</span>
+                                <span id="current-chat-id" class="vector-stats-value">加载中...</span>
+                            </div>
+                        </div>
+                        <div class="vector-stats-row">
+                            <div class="vector-stats-item vector-count-display">
+                                <span class="vector-stats-label">向量数量:</span>
+                                <span id="current-vector-count" class="vector-count-number">0</span>
+                                <button class="vector-refresh-btn" onclick="updateVectorCountDisplay()" title="刷新向量数量">
+                                    🔄
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="vector-tabs">
@@ -1414,6 +1727,15 @@
         const modal = document.getElementById('vector-manager-modal');
         modal.classList.add('show');
         isModalOpen = true;
+
+        // 初始化向量数量显示
+        updateVectorCountDisplay();
+
+        // 设置定时更新（每30秒更新一次）
+        if (vectorCountUpdateInterval) {
+            clearInterval(vectorCountUpdateInterval);
+        }
+        vectorCountUpdateInterval = setInterval(updateVectorCountDisplay, 30000);
     }
 
     /**
@@ -1427,6 +1749,12 @@
                 document.body.removeChild(modal);
                 isModalOpen = false;
             }, 300);
+        }
+
+        // 清理定时器
+        if (vectorCountUpdateInterval) {
+            clearInterval(vectorCountUpdateInterval);
+            vectorCountUpdateInterval = null;
         }
     }
 
@@ -1795,7 +2123,7 @@
 
             // 检查是否选择了角色
             const currentCharId = getCurrentCharacterId();
-            if (!currentCharId) {
+            if (currentCharId === null || currentCharId === undefined) {
                 showNotification('请先选择一个角色，向量数据需要与角色绑定', 'warning');
                 console.log('向量插件: 角色检查失败，characterId:', currentCharId);
                 return;
@@ -1906,6 +2234,9 @@
 
             // 更新结果列表
             updateResultsList(allChunks);
+
+            // 更新向量数量显示
+            setTimeout(updateVectorCountDisplay, 500);
 
             // 自动保存设置，避免用户需要手动点击保存
             saveSettings();
@@ -2161,6 +2492,16 @@
         // 监听聊天变化事件
         context.eventSource.on(context.eventTypes.CHAT_CHANGED, handleChatChanged);
 
+        // 监听角色选择事件（如果存在）
+        if (context.eventTypes.CHARACTER_SELECTED) {
+            context.eventSource.on(context.eventTypes.CHARACTER_SELECTED, handleCharacterChanged);
+        }
+
+        // 监听消息发送事件，用于更新向量数量
+        if (context.eventTypes.MESSAGE_SENT) {
+            context.eventSource.on(context.eventTypes.MESSAGE_SENT, handleMessageSent);
+        }
+
         console.log('向量插件: 事件监听器已注册');
     }
 
@@ -2197,7 +2538,32 @@
      */
     function handleChatChanged(chatId) {
         console.log('向量插件: 聊天已切换', chatId);
-        // 可以在这里做一些聊天切换后的初始化工作
+        // 如果模态框打开，更新向量数量显示
+        if (isModalOpen) {
+            setTimeout(updateVectorCountDisplay, 500); // 延迟更新，确保聊天数据已加载
+        }
+    }
+
+    /**
+     * 处理角色变化事件
+     */
+    function handleCharacterChanged(characterId) {
+        console.log('向量插件: 角色已切换', characterId);
+        // 如果模态框打开，更新向量数量显示
+        if (isModalOpen) {
+            setTimeout(updateVectorCountDisplay, 500); // 延迟更新，确保角色数据已加载
+        }
+    }
+
+    /**
+     * 处理消息发送事件
+     */
+    function handleMessageSent(messageId) {
+        console.log('向量插件: 消息已发送', messageId);
+        // 消息发送后可能会影响向量数量，延迟更新显示
+        if (isModalOpen) {
+            setTimeout(updateVectorCountDisplay, 1000); // 延迟更新，等待可能的向量化操作完成
+        }
     }
 
     /**
@@ -2205,6 +2571,23 @@
      */
     async function performVectorQueryAndInjection() {
         try {
+            console.log('=== 向量查询流程开始 ===');
+
+            // 0. 调试向量存储状态
+            await debugVectorStorage();
+
+            // 1. 获取当前向量总数
+            const totalVectorCount = await getCurrentVectorCount();
+            console.log(`📊 当前角色会话总向量数量: ${totalVectorCount}`);
+
+            if (totalVectorCount === 0) {
+                console.log('⚠️ 当前会话没有向量数据，跳过查询');
+                if (settings.vectorQuery.notifySuccess) {
+                    showNotification('当前会话没有向量数据，无法进行查询', 'info');
+                }
+                return;
+            }
+
             // 1. 获取最近的聊天消息作为查询文本
             const queryMessages = getRecentMessages(settings.vectorQuery.queryMessageCount);
             if (queryMessages.length === 0) {
@@ -2221,30 +2604,40 @@
                 return;
             }
 
-            console.log('向量插件: 查询文本', queryText.substring(0, 200) + '...');
+            console.log('🔍 查询文本预览:', queryText.substring(0, 200) + (queryText.length > 200 ? '...' : ''));
+            console.log(`📝 查询文本长度: ${queryText.length} 字符`);
 
             // 3. 执行向量查询
-            const vectorResults = await queryVectors(queryText);
+            console.log('🚀 开始执行向量查询...');
+            const vectorResults = await queryVectors(queryText, settings.vectorQuery.maxResults);
 
             if (!vectorResults || vectorResults.length === 0) {
-                console.log('向量插件: 没有找到相关的向量结果');
+                console.log('❌ 向量查询完成，但没有找到匹配结果');
+                console.log(`📊 查询统计: 总向量数 ${totalVectorCount}, 匹配成功 0 条`);
                 if (settings.vectorQuery.notifySuccess) {
-                    showNotification('向量查询完成，但没有找到相关内容', 'info');
+                    showNotification(`向量查询完成: 总向量${totalVectorCount}个，匹配成功0条`, 'info');
                 }
                 return;
             }
 
-            console.log(`向量插件: 找到 ${vectorResults.length} 个向量结果`);
+            console.log(`✅ 向量查询完成，初步匹配 ${vectorResults.length} 个结果`);
+
+            // 显示匹配结果的分数分布
+            const scores = vectorResults.map(r => r.score).sort((a, b) => b - a);
+            console.log(`📈 匹配分数分布: 最高 ${scores[0]?.toFixed(3)}, 最低 ${scores[scores.length-1]?.toFixed(3)}, 平均 ${(scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(3)}`);
 
             // 4. 应用分数阈值筛选
             const filteredResults = vectorResults.filter(result =>
                 result.score >= settings.vectorQuery.scoreThreshold
             );
 
+            console.log(`🔍 分数阈值筛选 (>=${settings.vectorQuery.scoreThreshold}): ${vectorResults.length} -> ${filteredResults.length} 条`);
+
             if (filteredResults.length === 0) {
-                console.log('向量插件: 所有结果都低于分数阈值');
+                console.log(`❌ 所有结果都低于分数阈值 ${settings.vectorQuery.scoreThreshold}`);
+                console.log(`📊 最终统计: 总向量数 ${totalVectorCount}, 匹配成功 0 条 (${vectorResults.length} 条被阈值过滤)`);
                 if (settings.vectorQuery.notifySuccess) {
-                    showNotification('向量查询完成，但所有结果都低于分数阈值', 'info');
+                    showNotification(`向量查询完成: 总向量${totalVectorCount}个，初步匹配${vectorResults.length}条，但都低于阈值`, 'info');
                 }
                 return;
             }
@@ -2252,26 +2645,43 @@
             // 5. 限制结果数量
             const limitedResults = filteredResults.slice(0, settings.vectorQuery.maxResults);
 
+            if (limitedResults.length < filteredResults.length) {
+                console.log(`📊 结果数量限制: ${filteredResults.length} -> ${limitedResults.length} 条 (限制为${settings.vectorQuery.maxResults}条)`);
+            }
+
             // 6. Rerank 处理（如果启用）
             let finalResults = limitedResults;
             if (settings.rerank.enabled && settings.rerank.apiKey) {
                 try {
+                    console.log('🔄 开始 Rerank 重排序处理...');
                     finalResults = await processRerank(queryText, limitedResults);
-                    console.log(`向量插件: Rerank 处理完成，最终结果数量: ${finalResults.length}`);
+                    console.log(`✅ Rerank 处理完成: ${limitedResults.length} -> ${finalResults.length} 条`);
                 } catch (error) {
-                    console.warn('向量插件: Rerank 处理失败，使用原始结果', error);
+                    console.warn('⚠️ Rerank 处理失败，使用原始结果:', error.message);
                     if (settings.rerank.notify) {
                         showNotification(`Rerank 处理失败: ${error.message}`, 'warning');
                     }
                 }
+            } else if (settings.rerank.enabled) {
+                console.log('⚠️ Rerank 已启用但未配置 API Key，跳过重排序');
             }
 
             // 7. 注入到聊天上下文
+            console.log(`💉 准备注入 ${finalResults.length} 条向量结果到聊天上下文`);
             await injectVectorResults(finalResults);
 
-            // 8. 成功通知
+            // 8. 最终统计和成功通知
+            console.log('=== 向量查询流程完成 ===');
+            console.log(`📊 最终统计:`);
+            console.log(`   - 总向量数量: ${totalVectorCount}`);
+            console.log(`   - 初步匹配: ${vectorResults.length} 条`);
+            console.log(`   - 阈值筛选: ${filteredResults.length} 条 (>=${settings.vectorQuery.scoreThreshold})`);
+            console.log(`   - 数量限制: ${limitedResults.length} 条 (最多${settings.vectorQuery.maxResults}条)`);
+            console.log(`   - 最终注入: ${finalResults.length} 条`);
+            console.log(`   - 匹配成功率: ${((finalResults.length / totalVectorCount) * 100).toFixed(1)}%`);
+
             if (settings.vectorQuery.notifySuccess) {
-                showNotification(`向量查询成功，注入了 ${finalResults.length} 个相关内容`, 'success');
+                showNotification(`向量查询成功: 总向量${totalVectorCount}个，匹配成功${finalResults.length}条 (${((finalResults.length / totalVectorCount) * 100).toFixed(1)}%)`, 'success');
             }
 
         } catch (error) {
@@ -2452,6 +2862,8 @@
     window.debugDetailedIssues = debugDetailedIssues;
     window.debugMessageStructure = debugMessageStructure;
     window.debugAIMessageFiltering = debugAIMessageFiltering;
+    window.updateVectorCountDisplay = updateVectorCountDisplay;
+    window.debugVectorStorage = debugVectorStorage;
 
     // 等待SillyTavern加载完成后初始化
     if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {

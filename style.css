@@ -70,6 +70,90 @@
     transform: scale(1.05);
 }
 
+/* 向量统计面板 */
+.vector-stats-panel {
+    background: #2a2a2a !important;
+    border-bottom: 2px solid #444444 !important;
+    padding: 16px 24px;
+    color: #ffffff !important;
+}
+
+.vector-stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.vector-stats-row:last-child {
+    margin-bottom: 0;
+}
+
+.vector-stats-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.vector-stats-label {
+    font-size: 14px;
+    color: #cccccc !important;
+    font-weight: 500;
+}
+
+.vector-stats-value {
+    font-size: 14px;
+    color: #00bfff !important;
+    font-weight: 600;
+    background: rgba(0, 191, 255, 0.1);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 191, 255, 0.3);
+}
+
+.vector-count-display {
+    background: rgba(40, 167, 69, 0.1);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(40, 167, 69, 0.3);
+}
+
+.vector-count-number {
+    font-size: 18px;
+    font-weight: 700;
+    color: #28a745 !important;
+    min-width: 30px;
+    text-align: center;
+    background: rgba(40, 167, 69, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(40, 167, 69, 0.4);
+}
+
+.vector-count-number.active {
+    color: #00ff00 !important;
+    background: rgba(0, 255, 0, 0.2);
+    border-color: rgba(0, 255, 0, 0.4);
+    box-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+}
+
+.vector-refresh-btn {
+    background: rgba(0, 123, 255, 0.1);
+    border: 1px solid rgba(0, 123, 255, 0.3);
+    color: #007bff !important;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.vector-refresh-btn:hover {
+    background: rgba(0, 123, 255, 0.2);
+    border-color: #007bff;
+    transform: scale(1.05);
+}
+
 /* 标签页导航 */
 .vector-tabs {
     display: flex;
@@ -378,16 +462,16 @@ input:checked + .vector-slider:before {
         width: 95%;
         max-height: 95vh;
     }
-    
+
     .vector-tabs {
         flex-wrap: wrap;
     }
-    
+
     .vector-tab {
         flex: 1 1 50%;
         min-width: 120px;
     }
-    
+
     .vector-modal-body {
         padding: 15px;
     }
